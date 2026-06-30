@@ -191,14 +191,23 @@ src/
 - Added `reqwest = { version = "0.12", features = ["json", "blocking"] }` to dependencies.
 - 4 unit tests in `slm::http_provider`; 2 integration tests for missing key / unknown model.
 
-## Phase R5 — Next Steps
+## Phase R5 — Completed
 
-1. **`--format json` for `list` and `diff`** — extend JSON output to remaining subcommands (small, same pattern as verify/hash).
+- **CI artifact** — `.github/workflows/ci.yml` with three jobs:
+  - `test` — `cargo test` on every push/PR to `main`
+  - `build` — `cargo build --release` after tests pass; uploads `tauto-linux-x86_64` artifact (30-day retention)
+  - `release` — triggered on `v*` tags only; downloads artifact, marks executable, calls `gh release create`
+- Release binary verified locally: 4.8 MB, all subcommands functional.
+- Uses `dtolnay/rust-toolchain@stable` + `Swatinem/rust-cache@v2` for fast CI.
 
-2. **CI artifact** — `cargo build --release` + GitHub Actions workflow.
+## Phase R6 — Next Steps
 
-3. **Lean proof attempt pipeline** — validate generated proofs by running `lake build`.
+1. **`--format json` for `list` and `diff`** — extend JSON output to remaining subcommands (small, ~25 lines, same pattern as verify/hash).
+
+2. **Lean proof attempt pipeline** — validate generated proofs by running `lake build`.
    Blocked until Lean/Lake installed.
+
+3. **Cross-platform CI** — add `macos-latest` matrix entry to `build` job.
 
 ---
 
