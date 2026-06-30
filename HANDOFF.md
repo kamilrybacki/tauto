@@ -17,7 +17,7 @@ tauto-phase-0-2
 Latest commit at handoff:
 
 ```text
-2b9c2b5 fix: address code review findings from phase 3
+0456016 fix: address backend-patterns review findings
 ```
 
 Phase 3 is complete. The branch now includes Phase 0 foundation, Phase 1 local
@@ -100,10 +100,13 @@ Provides the provider-neutral AST-to-code generation seam:
 - `AstCodeGenerationRequest`, `AstCodeGenerationResult`, `GeneratedCodeArtifact`
 - `SlmProviderRef`, `SlmCodeGenerator`, `generate_code_from_ast`
 - `ArtifactTraceability`, `build_traceability` — ties contract_set_hash,
-  provider, target_language, artifact_kind, and deterministic_context_hash
+  provider (optional — `None` for deterministic generators like Lean),
+  target_language, artifact_kind, and deterministic_context_hash
 
-`build_traceability` reads `contract_set_hash` from `DeterministicContext.entries`
-rather than recomputing it — consistent with the preprocessing layer as the authority.
+`build_traceability` accepts `contract_set_hash: str` and
+`deterministic_context_hash: str` directly — no import of `DeterministicContext`
+in the SLM package. Callers extract these from `ctx.entries["contract_set_hash"]`
+and `ctx.context_hash`.
 
 ### `tauto_preprocessing`
 
@@ -191,7 +194,7 @@ python3 -m pytest /home/kamil-rybacki/Code/tauto/.worktrees/tauto-phase-0-2/ -q
 Last result:
 
 ```text
-43 passed
+44 passed
 ```
 
 Ruff is configured in `pyproject.toml`, but is not installed in the ambient environment:
@@ -219,6 +222,22 @@ Not implemented yet:
 - PostgreSQL persistence
 - Worker orchestration
 - CI/GitHub integration
+
+Deferred reviewer findings (address in a later phase):
+
+- **H1 (backend-patterns)**: No shared `GeneratedArtifact` model or `Generator`
+  Protocol across Lean and SLM backends. `LeanWorkspaceFile` and
+  `GeneratedCodeArtifact` are near-identical. Define one abstraction when the
+  second deterministic generator (runtime validator) lands.
+- **M1 (backend-patterns)**: Three incompatible shapes for "deterministic context"
+  (`DeterministicContext`, raw `dict[str,str]` in `AstCodeGenerationRequest`,
+  and `context_hash: str` in traceability). Wire them together when wiring the
+  SLM request pipeline end-to-end.
+- **M5 (backend-patterns)**: `_render_expr` in `workspace.py` discards
+  `Expression.kind` — `bool` renders as Python `"True"`, not Lean `true`. Fix
+  when replacing sorry-stubs with real theorem bodies.
+- **L2/L3 (backend-patterns)**: `target_language` and `generator_intent` are
+  free strings; should become Literals to prevent typo-driven cache key drift.
 
 When an API server is added, wrap the pure-function packages in a **Service Layer**
 that owns error handling, structured logging, and response envelopes — do not grow
