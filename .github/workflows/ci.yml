@@ -23,8 +23,8 @@ jobs:
       - name: Cache Rust build artefacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Run tests
-        run: cargo test
+      - name: Run unit tests
+        run: cargo test --lib
 
   build:
     name: Build release binary
@@ -72,7 +72,10 @@ jobs:
             | sh -s -- -y --default-toolchain leanprover/lean4:stable
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
-      - name: Generate workspace and verify with lake build
+      - name: Run integration tests (requires lake in PATH)
+        run: cargo test --test cli_integration
+
+      - name: Verify workspace compiles with lake build
         run: |
           ./target/release/tauto verify tests/fixtures/orders.md \
             --output /tmp/lean-workspace \

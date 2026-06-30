@@ -16,6 +16,20 @@ pub enum LakeError {
     Io(#[from] std::io::Error),
 }
 
+pub fn check_lean_available() -> Result<(), LakeError> {
+    Command::new("lake")
+        .arg("--version")
+        .output()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                LakeError::NotFound
+            } else {
+                LakeError::Io(e)
+            }
+        })?;
+    Ok(())
+}
+
 pub fn run_lake_build(workspace_path: &Path) -> Result<LakeBuildResult, LakeError> {
     let output = Command::new("lake")
         .arg("build")

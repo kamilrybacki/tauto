@@ -8,8 +8,8 @@ use tauto::contract_ir::{
 };
 use tauto::contract_parser::{extract_contract_blocks, parse_contract_block};
 use tauto::lean_gen::{
-    LakeError, LeanWorkspace, generate_lean_workspace, run_lake_build, scan_lean_workspace,
-    write_lean_workspace,
+    LakeError, LeanWorkspace, check_lean_available, generate_lean_workspace, run_lake_build,
+    scan_lean_workspace, write_lean_workspace,
 };
 use tauto::project_store::{save_document, ContractDocument};
 use tauto::slm::{ArtifactKind, CodeGenerationRequest, DeepSeekProvider, SlmCodeGenerator};
@@ -90,6 +90,12 @@ enum Commands {
 
 fn main() {
     let cli = Cli::parse();
+
+    if let Err(e) = check_lean_available() {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
+
     let result = match cli.command {
         Commands::Verify { path, output, strict, format, model, lean_check } => {
             run_verify(&path, &output, strict, &format, &model, lean_check)
