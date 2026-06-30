@@ -118,8 +118,9 @@ fn hash_format_json_outputs_valid_json() {
 
 #[test]
 fn hash_semantic_is_stable_across_path_changes() {
-    // Parsing the same logical contracts from two different file paths should
-    // yield the same semantic hash (source excluded) but different provenance hashes.
+    // Same contract bodies at different file paths:
+    // - semantic hash (excludes source) must be equal
+    // - provenance hash (includes document_path) must differ
     let out1 = tauto()
         .args(["hash", &fixture("base/orders.md"), "--format", "json"])
         .assert()
@@ -128,7 +129,7 @@ fn hash_semantic_is_stable_across_path_changes() {
         .stdout
         .clone();
     let out2 = tauto()
-        .args(["hash", &fixture("base/orders.md"), "--format", "json"])
+        .args(["hash", &fixture("mirror/orders.md"), "--format", "json"])
         .assert()
         .success()
         .get_output()
@@ -137,8 +138,8 @@ fn hash_semantic_is_stable_across_path_changes() {
 
     let v1: serde_json::Value = serde_json::from_str(&String::from_utf8(out1).unwrap()).unwrap();
     let v2: serde_json::Value = serde_json::from_str(&String::from_utf8(out2).unwrap()).unwrap();
-    assert_eq!(v1["semantic"], v2["semantic"]);
-    assert_eq!(v1["provenance"], v2["provenance"]);
+    assert_eq!(v1["semantic"], v2["semantic"], "semantic hash must be path-independent");
+    assert_ne!(v1["provenance"], v2["provenance"], "provenance hash must capture document_path");
 }
 
 // ── list ─────────────────────────────────────────────────────────────────────
