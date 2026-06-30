@@ -7,7 +7,6 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Serialize;
-use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::contract_ir::{find_conflict_candidates, ContractIR, ContractSet};
@@ -242,12 +241,13 @@ async fn serve_inner(
     let serve_dir =
         ServeDir::new(&ui_dist).not_found_service(ServeFile::new(index_html));
 
+    // No CORS middleware: the SPA is served by the same process (same-origin).
+    // Adding permissive CORS would allow any website to exfiltrate local contracts.
     let app = Router::new()
         .route("/api/v1/contracts", get(handle_contracts))
         .route("/api/v1/graph", get(handle_graph))
         .with_state(state)
-        .fallback_service(serve_dir)
-        .layer(CorsLayer::permissive());
+        .fallback_service(serve_dir);
 
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;

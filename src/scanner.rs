@@ -11,7 +11,11 @@ pub fn scan_path(path: &std::path::Path) -> std::io::Result<(ContractSet, usize,
     let mut contracts = Vec::new();
     let mut parse_errors = 0usize;
     for file_path in &files {
-        let content = std::fs::read_to_string(file_path)?;
+        // Skip unreadable files rather than failing the entire scan.
+        let content = match std::fs::read_to_string(file_path) {
+            Ok(c) => c,
+            Err(_) => { parse_errors += 1; continue; }
+        };
         let doc_path = file_path.display().to_string();
         for block in &extract_contract_blocks(&content, &doc_path) {
             let result = parse_contract_block(block);
@@ -38,9 +42,12 @@ fn collect_recursive(dir: &std::path::Path, files: &mut Vec<PathBuf>) -> std::io
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let p = entry.path();
-        if p.is_dir() {
+        // Use DirEntry::file_type() (no extra syscall, does NOT follow symlinks)
+        // to avoid infinite recursion on circular symlinks.
+        let ft = entry.file_type()?;
+        if ft.is_dir() {
             collect_recursive(&p, files)?;
-        } else if p.extension().map(|e| e == "md").unwrap_or(false) {
+        } else if ft.is_file() && p.extension().map(|e| e == "md").unwrap_or(false) {
             files.push(p);
         }
     }
