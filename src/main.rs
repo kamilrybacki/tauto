@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use tauto::contract_ir::{ContractSet, semantic_contract_set_hash, contract_set_hash};
+use tauto::contract_ir::{contract_set_hash, semantic_contract_set_hash, ContractSet};
 use tauto::contract_parser::{extract_contract_blocks, parse_contract_block};
 use tauto::lean_gen::{generate_lean_workspace, scan_lean_workspace, write_lean_workspace};
 
@@ -22,9 +22,17 @@ enum Commands {
         /// Where to write the generated Lean workspace
         #[arg(long, default_value = "lean-workspace")]
         output: PathBuf,
+        /// Exit with code 1 if any sorry stubs remain (for CI)
+        #[arg(long)]
+        strict: bool,
     },
-    /// Print semantic and provenance hashes for a contract set (useful for cache keys)
+    /// Print semantic and provenance hashes for a contract set (CI cache keys)
     Hash {
+        /// Directory or file containing contract markdown (recursive)
+        path: PathBuf,
+    },
+    /// List parsed contracts without generating output
+    List {
         /// Directory or file containing contract markdown (recursive)
         path: PathBuf,
     },
@@ -33,8 +41,9 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
-        Commands::Verify { path, output } => run_verify(&path, &output),
+        Commands::Verify { path, output, strict } => run_verify(&path, &output, strict),
         Commands::Hash { path } => run_hash(&path),
+        Commands::List { path } => run_list(&path),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
@@ -42,7 +51,11 @@ fn main() {
     }
 }
 
-fn run_verify(path: &PathBuf, output: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn run_verify(
+    path: &PathBuf,
+    output: &PathBuf,
+    strict: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let (contract_set, parse_errors, file_count) = parse_contracts(path)?;
 
     if contract_set.contracts.is_empty() {
@@ -70,6 +83,9 @@ fn run_verify(path: &PathBuf, output: &PathBuf) -> Result<(), Box<dyn std::error
             );
         }
         println!("{} safety finding(s) — sorry stubs require proof.", diagnostics.len());
+        if strict {
+            std::process::exit(1);
+        }
     }
 
     Ok(())
@@ -87,6 +103,21 @@ fn run_hash(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     println!("files     : {file_count}");
     println!("semantic  : {}", semantic_contract_set_hash(&contract_set));
     println!("provenance: {}", contract_set_hash(&contract_set));
+
+    Ok(())
+}
+
+fn run_list(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    let (contract_set, parse_errors, file_count) = parse_contracts(path)?;
+
+    println!("{} contract(s) from {} file(s) ({parse_errors} parse error(s)):", contract_set.contracts.len(), file_count);
+    for c in &contract_set.contracts {
+        let src = c.source.as_ref().map(|s| format!("  [{}:{}]", s.document_path, s.start_line)).unwrap_or_default();
+        println!(
+            "  {}/{}/{}{src}",
+            c.entity, c.operation, c.case
+        );
+    }
 
     Ok(())
 }
