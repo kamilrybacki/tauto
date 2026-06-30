@@ -3,4 +3,6 @@ pub mod contract_parser;
 pub mod lean_gen;
 pub mod preprocessing;
 pub mod project_store;
+pub mod scanner;
+pub mod server;
 pub mod slm;

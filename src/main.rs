@@ -12,6 +12,8 @@ use tauto::lean_gen::{
     scan_lean_workspace, write_lean_workspace,
 };
 use tauto::project_store::{load_document, save_document, ContractDocument};
+use tauto::scanner::collect_markdown_files;
+use tauto::server::run_serve;
 use tauto::slm::{ArtifactKind, CodeGenerationRequest, DeepSeekProvider, SlmCodeGenerator};
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
@@ -104,6 +106,17 @@ enum Commands {
         #[arg(long, default_value = "text", value_enum)]
         format: OutputFormat,
     },
+    /// Start a local web UI to browse business logic contracts
+    Serve {
+        /// Directory or file containing contract markdown (recursive)
+        path: PathBuf,
+        /// Port to listen on
+        #[arg(long, default_value = "4000")]
+        port: u16,
+        /// Path to the compiled frontend assets (ui/dist)
+        #[arg(long, default_value = "ui/dist")]
+        ui_dist: PathBuf,
+    },
 }
 
 fn main() {
@@ -130,6 +143,9 @@ fn main() {
         }
         Commands::Retrieve { project, store_root, format } => {
             run_retrieve(&project, &store_root, &format)
+        }
+        Commands::Serve { path, port, ui_dist } => {
+            run_serve(path, port, ui_dist).map_err(|e| e.to_string().into())
         }
     };
     if let Err(e) = result {
@@ -568,9 +584,7 @@ fn run_retrieve(
     }
 
     // Walk the project directory, collect .md files (skip .json sidecars)
-    let mut md_files: Vec<PathBuf> = Vec::new();
-    collect_recursive(&project_dir, &mut md_files)?;
-    md_files.sort();
+    let md_files = collect_markdown_files(&project_dir)?;
 
     if md_files.is_empty() {
         eprintln!("No stored documents found for project '{project}'.");
@@ -678,25 +692,3 @@ fn parse_contracts(
     Ok((ContractSet::new(contracts), parse_errors, files.len()))
 }
 
-fn collect_markdown_files(path: &std::path::Path) -> std::io::Result<Vec<PathBuf>> {
-    if path.is_file() {
-        return Ok(vec![path.to_path_buf()]);
-    }
-    let mut files = Vec::new();
-    collect_recursive(path, &mut files)?;
-    files.sort();
-    Ok(files)
-}
-
-fn collect_recursive(dir: &std::path::Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let p = entry.path();
-        if p.is_dir() {
-            collect_recursive(&p, files)?;
-        } else if p.extension().map(|e| e == "md").unwrap_or(false) {
-            files.push(p);
-        }
-    }
-    Ok(())
-}
