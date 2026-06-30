@@ -1,8 +1,9 @@
-def test_tauto_packages_import() -> None:
-    import tauto_contract_ir
-    import tauto_contract_parser
-    import tauto_project_store
+from tauto_contract_ir import ContractIR, ContractSet
+from tauto_contract_parser import extract_contract_blocks, parse_contract_block
 
-    assert tauto_contract_ir.__all__ == []
-    assert tauto_contract_parser.__all__ == []
-    assert tauto_project_store.__all__ == ["ContractDocument", "Project"]
+
+def test_tauto_packages_export_core_symbols() -> None:
+    assert ContractSet().contracts == []
+    assert ContractIR(case="A", entity="Order", operation="cancelOrder").case == "A"
+    assert extract_contract_blocks("# Empty\n", "rules.md") == []
+    assert callable(parse_contract_block)
