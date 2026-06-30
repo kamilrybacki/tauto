@@ -13,25 +13,26 @@ fn semantic_contract_value(contract: &ContractIR) -> serde_json::Value {
     if !contract.ensures.is_empty() {
         map.insert("ensures".to_owned(), serde_json::to_value(&contract.ensures).unwrap());
     }
-    if !contract.forbids.is_empty() {
-        map.insert("forbids".to_owned(), serde_json::to_value(&contract.forbids).unwrap());
+    if !contract.forbidden.is_empty() {
+        map.insert("forbidden".to_owned(), serde_json::to_value(&contract.forbidden).unwrap());
+    }
+    if !contract.preserves.is_empty() {
+        map.insert("preserves".to_owned(), serde_json::to_value(&contract.preserves).unwrap());
+    }
+    if !contract.assumes.is_empty() {
+        map.insert("assumes".to_owned(), serde_json::to_value(&contract.assumes).unwrap());
     }
     // source intentionally excluded
     serde_json::Value::Object(map)
 }
 
 pub fn semantic_contract_set_json(contract_set: &ContractSet) -> String {
-    let contracts: Vec<serde_json::Value> = contract_set
-        .contracts
-        .iter()
-        .map(semantic_contract_value)
-        .collect();
+    let contracts: Vec<serde_json::Value> =
+        contract_set.contracts.iter().map(semantic_contract_value).collect();
     let payload = serde_json::json!({
         "schema_version": contract_set.schema_version,
         "contracts": contracts,
     });
-    // serde_json sorts object keys lexicographically when using BTreeMap-backed Value
-    // We ensure determinism by constructing with explicit key order above.
     serde_json::to_string(&payload).unwrap()
 }
 
@@ -56,7 +57,7 @@ pub fn contract_set_hash(contract_set: &ContractSet) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contract_ir::models::{Condition, ContractIR, ContractSet, Expression, SourceLocation};
+    use crate::contract_ir::models::{ContractIR, ContractSet, SourceLocation};
 
     fn simple_set() -> ContractSet {
         ContractSet::new(vec![ContractIR::new("CancelPaidOrder", "Order", "cancelOrder")])
@@ -65,9 +66,9 @@ mod tests {
     fn set_with_source() -> ContractSet {
         let mut c = ContractIR::new("CancelPaidOrder", "Order", "cancelOrder");
         c.source = Some(SourceLocation {
-            file: "spec.md".to_owned(),
-            line: Some(42),
-            column: None,
+            document_path: "spec.md".to_owned(),
+            start_line: 10,
+            end_line: 20,
         });
         ContractSet::new(vec![c])
     }

@@ -1,18 +1,28 @@
 use serde::{Deserialize, Serialize};
 
+/// Typed value inside an Expression. Untagged so it round-trips as a JSON primitive.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SourceLocation {
-    pub file: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub column: Option<u64>,
+#[serde(untagged)]
+pub enum ExpressionValue {
+    Bool(bool),
+    Int(i64),
+    Str(String),
+}
+
+impl std::fmt::Display for ExpressionValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExpressionValue::Bool(b) => write!(f, "{b}"),
+            ExpressionValue::Int(n) => write!(f, "{n}"),
+            ExpressionValue::Str(s) => write!(f, "{s}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Expression {
     pub kind: String,
-    pub value: serde_json::Value,
+    pub value: ExpressionValue,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -25,18 +35,39 @@ pub struct Condition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ForbiddenOperation {
     pub operation: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<Expression>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SourceLocation {
+    pub document_path: String,
+    pub start_line: u32,
+    pub end_line: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Diagnostic {
-    pub message: String,
     pub category: String,
+    pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub document_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<usize>,
+    pub line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<String>,
+}
+
+impl Diagnostic {
+    pub fn parse_error(message: impl Into<String>, document_path: Option<String>, line: Option<u32>) -> Self {
+        Self {
+            category: "parse_error".to_owned(),
+            message: message.into(),
+            document_path,
+            line,
+            suggestion: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -49,7 +80,11 @@ pub struct ContractIR {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ensures: Vec<Condition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub forbids: Vec<ForbiddenOperation>,
+    pub forbidden: Vec<ForbiddenOperation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preserves: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assumes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<SourceLocation>,
 }
@@ -62,7 +97,9 @@ impl ContractIR {
             operation: operation.into(),
             requires: Vec::new(),
             ensures: Vec::new(),
-            forbids: Vec::new(),
+            forbidden: Vec::new(),
+            preserves: Vec::new(),
+            assumes: Vec::new(),
             source: None,
         }
     }
@@ -70,16 +107,13 @@ impl ContractIR {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContractSet {
-    pub schema_version: String,
+    pub schema_version: u32,
     pub contracts: Vec<ContractIR>,
 }
 
 impl ContractSet {
     pub fn new(contracts: Vec<ContractIR>) -> Self {
-        Self {
-            schema_version: "1".to_owned(),
-            contracts,
-        }
+        Self { schema_version: 1, contracts }
     }
 }
 
@@ -87,18 +121,15 @@ impl ContractSet {
 mod tests {
     use super::*;
 
-    fn expr(kind: &str, value: &str) -> Expression {
-        Expression {
-            kind: kind.to_owned(),
-            value: serde_json::Value::String(value.to_owned()),
-        }
+    fn str_expr(kind: &str, value: &str) -> Expression {
+        Expression { kind: kind.to_owned(), value: ExpressionValue::Str(value.to_owned()) }
     }
 
     fn condition(left: &str, op: &str, right: &str) -> Condition {
         Condition {
-            left: expr("field", left),
+            left: str_expr("field", left),
             operator: op.to_owned(),
-            right: expr("enum", right),
+            right: str_expr("enum", right),
         }
     }
 
@@ -110,23 +141,29 @@ mod tests {
         assert_eq!(c.operation, "cancelOrder");
         assert!(c.requires.is_empty());
         assert!(c.ensures.is_empty());
-        assert!(c.forbids.is_empty());
+        assert!(c.forbidden.is_empty());
+        assert!(c.preserves.is_empty());
+        assert!(c.assumes.is_empty());
         assert!(c.source.is_none());
     }
 
     #[test]
     fn contract_set_new_sets_schema_version() {
         let cs = ContractSet::new(vec![ContractIR::new("A", "B", "C")]);
-        assert_eq!(cs.schema_version, "1");
+        assert_eq!(cs.schema_version, 1);
         assert_eq!(cs.contracts.len(), 1);
     }
 
     #[test]
-    fn source_location_is_optional_in_contract() {
-        let mut c = ContractIR::new("Test", "Entity", "op");
-        assert!(c.source.is_none());
-        c.source = Some(SourceLocation { file: "spec.md".to_owned(), line: Some(10), column: None });
-        assert!(c.source.is_some());
+    fn source_location_uses_document_path_and_line_range() {
+        let loc = SourceLocation {
+            document_path: "spec.md".to_owned(),
+            start_line: 10,
+            end_line: 15,
+        };
+        assert_eq!(loc.document_path, "spec.md");
+        assert_eq!(loc.start_line, 10);
+        assert_eq!(loc.end_line, 15);
     }
 
     #[test]
@@ -137,7 +174,9 @@ mod tests {
             operation: "cancelOrder".to_owned(),
             requires: vec![condition("order.status", "==", "Paid")],
             ensures: vec![condition("result.status", "==", "Cancelled")],
-            forbids: vec![],
+            forbidden: vec![],
+            preserves: vec![],
+            assumes: vec![],
             source: None,
         };
         let json = serde_json::to_string(&c).unwrap();
@@ -151,7 +190,9 @@ mod tests {
         let json = serde_json::to_string(&c).unwrap();
         assert!(!json.contains("requires"));
         assert!(!json.contains("ensures"));
-        assert!(!json.contains("forbids"));
+        assert!(!json.contains("forbidden"));
+        assert!(!json.contains("preserves"));
+        assert!(!json.contains("assumes"));
     }
 
     #[test]
@@ -162,10 +203,10 @@ mod tests {
     }
 
     #[test]
-    fn forbidden_operation_with_reason_round_trips() {
+    fn forbidden_operation_with_args_round_trips() {
         let f = ForbiddenOperation {
             operation: "deleteOrder".to_owned(),
-            reason: Some("immutable after payment".to_owned()),
+            args: vec![str_expr("field", "order.id")],
         };
         let json = serde_json::to_string(&f).unwrap();
         let back: ForbiddenOperation = serde_json::from_str(&json).unwrap();
@@ -173,14 +214,27 @@ mod tests {
     }
 
     #[test]
-    fn diagnostic_fields_are_accessible() {
-        let d = Diagnostic {
-            message: "unverified theorem".to_owned(),
-            category: "lean_sorry".to_owned(),
-            document_path: Some("contracts/Foo.lean".to_owned()),
-            line: Some(7),
-        };
-        assert_eq!(d.category, "lean_sorry");
-        assert_eq!(d.line, Some(7));
+    fn expression_value_bool_round_trips() {
+        let e = Expression { kind: "bool".to_owned(), value: ExpressionValue::Bool(true) };
+        let json = serde_json::to_string(&e).unwrap();
+        let back: Expression = serde_json::from_str(&json).unwrap();
+        assert_eq!(e, back);
+    }
+
+    #[test]
+    fn expression_value_int_round_trips() {
+        let e = Expression { kind: "int".to_owned(), value: ExpressionValue::Int(42) };
+        let json = serde_json::to_string(&e).unwrap();
+        let back: Expression = serde_json::from_str(&json).unwrap();
+        assert_eq!(e, back);
+    }
+
+    #[test]
+    fn diagnostic_parse_error_constructor() {
+        let d = Diagnostic::parse_error("Missing case", Some("spec.md".to_owned()), Some(3));
+        assert_eq!(d.category, "parse_error");
+        assert_eq!(d.document_path.as_deref(), Some("spec.md"));
+        assert_eq!(d.line, Some(3));
+        assert!(d.suggestion.is_none());
     }
 }

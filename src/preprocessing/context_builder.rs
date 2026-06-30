@@ -78,7 +78,7 @@ mod tests {
     fn source_location_change_does_not_affect_context_hash() {
         let cs1 = one_contract();
         let mut c2 = ContractIR::new("CancelPaidOrder", "Order", "cancelOrder");
-        c2.source = Some(SourceLocation { file: "spec.md".to_owned(), line: Some(1), column: None });
+        c2.source = Some(SourceLocation { document_path: "spec.md".to_owned(), start_line: 1, end_line: 1 });
         let cs2 = ContractSet::new(vec![c2]);
         let ctx1 = build_deterministic_context(&cs1, "lean_gen");
         let ctx2 = build_deterministic_context(&cs2, "lean_gen");

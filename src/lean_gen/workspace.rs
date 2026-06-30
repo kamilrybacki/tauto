@@ -1,4 +1,4 @@
-use crate::contract_ir::{Condition, ContractIR, ContractSet, Expression};
+use crate::contract_ir::{Condition, ContractIR, ContractSet, Expression, ExpressionValue};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LeanWorkspaceFile {
@@ -33,11 +33,7 @@ fn assign_module_names(contracts: &[ContractIR]) -> Vec<String> {
     for c in contracts {
         let base = lean_ident(&c.case);
         let count = seen.entry(base.clone()).or_insert(0);
-        let name = if *count == 0 {
-            base.clone()
-        } else {
-            format!("{}_{}", base, count)
-        };
+        let name = if *count == 0 { base.clone() } else { format!("{}_{}", base, count) };
         *count += 1;
         names.push(name);
     }
@@ -46,8 +42,9 @@ fn assign_module_names(contracts: &[ContractIR]) -> Vec<String> {
 
 fn render_expr(expr: &Expression) -> String {
     match &expr.value {
-        serde_json::Value::String(s) => s.clone(),
-        v => v.to_string(),
+        ExpressionValue::Str(s) => s.clone(),
+        ExpressionValue::Int(n) => n.to_string(),
+        ExpressionValue::Bool(b) => b.to_string(),
     }
 }
 
@@ -114,10 +111,7 @@ defaultTargets = ["TautoContracts"]
 [[lean_lib]]
 name = "TautoContracts"
 "#;
-    LeanWorkspaceFile {
-        path: "lakefile.toml".to_owned(),
-        content: content.to_owned(),
-    }
+    LeanWorkspaceFile { path: "lakefile.toml".to_owned(), content: content.to_owned() }
 }
 
 pub fn generate_lean_workspace(contract_set: &ContractSet) -> LeanWorkspace {
@@ -138,17 +132,18 @@ pub fn generate_lean_workspace(contract_set: &ContractSet) -> LeanWorkspace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contract_ir::{Condition, ContractIR, ContractSet, Expression};
+    use crate::contract_ir::{Condition, ContractIR, ContractSet, Expression, ExpressionValue};
 
-    fn expr(kind: &str, value: &str) -> Expression {
-        Expression {
-            kind: kind.to_owned(),
-            value: serde_json::Value::String(value.to_owned()),
-        }
+    fn str_expr(kind: &str, value: &str) -> Expression {
+        Expression { kind: kind.to_owned(), value: ExpressionValue::Str(value.to_owned()) }
     }
 
     fn cond(left: &str, op: &str, right: &str) -> Condition {
-        Condition { left: expr("field", left), operator: op.to_owned(), right: expr("enum", right) }
+        Condition {
+            left: str_expr("field", left),
+            operator: op.to_owned(),
+            right: str_expr("enum", right),
+        }
     }
 
     fn minimal_set() -> ContractSet {
@@ -162,7 +157,9 @@ mod tests {
             operation: "cancelOrder".to_owned(),
             requires: vec![cond("order.status", "==", "Paid")],
             ensures: vec![cond("result.status", "==", "Cancelled")],
-            forbids: vec![],
+            forbidden: vec![],
+            preserves: vec![],
+            assumes: vec![],
             source: None,
         }])
     }
@@ -227,8 +224,6 @@ mod tests {
         let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
         assert!(f.content.contains("sorry"));
     }
-
-    // Module naming tests
 
     #[test]
     fn digit_leading_case_gets_c_prefix() {

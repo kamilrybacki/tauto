@@ -32,7 +32,8 @@ pub fn scan_lean_workspace(workspace: &LeanWorkspace) -> Vec<Diagnostic> {
                         ),
                         category: pattern.category.to_owned(),
                         document_path: Some(file.path.clone()),
-                        line: Some(line_idx + 1),
+                        line: Some((line_idx + 1) as u32),
+                        suggestion: None,
                     });
                 }
             }
@@ -63,10 +64,10 @@ fn line_contains_token(line: &str, token: &str) -> bool {
 mod tests {
     use super::*;
     use crate::lean_gen::workspace::{LeanWorkspace, LeanWorkspaceFile, generate_lean_workspace};
-    use crate::contract_ir::{Condition, ContractIR, ContractSet, Expression};
+    use crate::contract_ir::{Condition, ContractIR, ContractSet, Expression, ExpressionValue};
 
     fn expr(kind: &str, value: &str) -> Expression {
-        Expression { kind: kind.to_owned(), value: serde_json::Value::String(value.to_owned()) }
+        Expression { kind: kind.to_owned(), value: ExpressionValue::Str(value.to_owned()) }
     }
 
     fn cond(left: &str, op: &str, right: &str) -> Condition {
@@ -80,7 +81,9 @@ mod tests {
             operation: "cancelOrder".to_owned(),
             requires: vec![cond("order.status", "==", "Paid")],
             ensures: vec![cond("result.status", "==", "Cancelled")],
-            forbids: vec![],
+            forbidden: vec![],
+            preserves: vec![],
+            assumes: vec![],
             source: None,
         }])
     }
