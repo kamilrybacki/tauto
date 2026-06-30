@@ -208,3 +208,83 @@ fn diff_strict_exits_zero_when_expansion_only() {
         .assert()
         .success();
 }
+
+// ── store ─────────────────────────────────────────────────────────────────────
+
+#[test]
+fn store_creates_document_file_under_project_slug() {
+    let store = tempfile::tempdir().unwrap();
+    tauto()
+        .args([
+            "store",
+            &fixture("orders.md"),
+            "--project",
+            "my-project",
+            "--store-root",
+            store.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("my-project"));
+    assert!(store.path().join("my-project").join("orders.md").exists());
+}
+
+#[test]
+fn store_format_json_reports_stored_paths() {
+    let store = tempfile::tempdir().unwrap();
+    let output = tauto()
+        .args([
+            "store",
+            &fixture("orders.md"),
+            "--project",
+            "orders-proj",
+            "--store-root",
+            store.path().to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&text).expect("must be valid JSON");
+    assert_eq!(v["project"], "orders-proj");
+    assert!(v["stored"].is_array());
+    assert_eq!(v["stored"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn store_creates_json_sidecar_metadata() {
+    let store = tempfile::tempdir().unwrap();
+    tauto()
+        .args([
+            "store",
+            &fixture("orders.md"),
+            "--project",
+            "sidecar-test",
+            "--store-root",
+            store.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    assert!(store.path().join("sidecar-test").join("orders.md.json").exists());
+}
+
+#[test]
+fn store_slug_normalizes_spaces_to_hyphens() {
+    let store = tempfile::tempdir().unwrap();
+    tauto()
+        .args([
+            "store",
+            &fixture("orders.md"),
+            "--project",
+            "My Project",
+            "--store-root",
+            store.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    assert!(store.path().join("my-project").exists());
+}

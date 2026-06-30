@@ -21,7 +21,7 @@ The Python prototype (Phases 0-2, 44 tests, 3 reviewed phases) is in git history
 ## Current State
 
 **Branch:** `tauto-phase-0-2`
-**Tests:** 131 passing (116 unit, 15 integration)
+**Tests:** 135 passing (116 unit, 19 integration)
 **Binary:** `cargo build` → `./target/debug/tauto`
 
 ### CLI Commands
@@ -43,6 +43,12 @@ tauto list <path>
 tauto diff <base> <new> [--strict]
     Structural diff between two contract sets; heuristic conflict detection on changed contracts.
     --strict exits 1 if diff is not expansion-only.
+
+tauto store <path> --project <slug> [--store-root <dir>] [--format text|json]
+    Store contract markdown files under a project slug for incremental re-verification.
+    Slug normalized to lowercase-hyphen. Writes a JSON sidecar alongside each markdown file.
+    --format json emits { project, stored: [...paths] }.
+    Default store-root: tauto-store/
 ```
 
 ### Integration tests
@@ -144,7 +150,7 @@ src/
 | `contract_parser::dsl` | 13 |
 | `project_store::models` | 4 |
 | `project_store::file_store` | 5 |
-| **integration (cli_integration)** | **15** |
+| **integration (cli_integration)** | **19** |
 
 ---
 
@@ -153,23 +159,28 @@ src/
 - **Integration tests** — 15 tests via `assert_cmd`+`predicates`, fixture markdown files in `tests/fixtures/`.
 - **`--format json`** — added to `verify` and `hash` subcommands. JSON schema documented above.
 
-## Phase R3 — Next Steps
+## Phase R3 — Completed
 
-1. **Real SLM integration** — wire an actual LLM API behind `SlmCodeGenerator`.
+- **`tauto store` subcommand** — `run_store` wires `project_store::{save_document, ContractDocument}` to the CLI.
+  Stores markdown files under `<store-root>/<project-slug>/<filename>` with JSON sidecar metadata.
+  `--format json` emits `{ project, stored: [...paths] }`.
+  4 new integration tests: document file creation, JSON output, sidecar metadata, slug normalization.
+
+## Phase R4 — Next Steps
+
+1. **`--format json` for `list` and `diff`** — extend JSON output to remaining subcommands (small, same pattern as verify/hash).
+
+2. **CI artifact** — `cargo build --release` + GitHub Actions workflow. Fully testable locally with `cargo build --release`.
+
+3. **Real SLM integration** — wire an actual LLM API behind `SlmCodeGenerator`.
    `DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `NVIDIA_API_KEY` are available in the environment.
-   Add `reqwest` (with `json`, `blocking` features) + `tokio` (or use blocking) to `Cargo.toml`.
-   Implement `src/slm/http_provider.rs` (DeepSeek adapter is simplest: one POST to
-   `https://api.deepseek.com/v1/chat/completions`). Wire into `tauto verify --model <name>`.
+   Add `reqwest` (with `json`, `blocking` features) to `Cargo.toml`.
+   Implement `src/slm/http_provider.rs` (DeepSeek adapter: one POST to the chat completions endpoint).
+   Wire into `tauto verify --model <name>`.
+   **Constraint**: Lean/Lake not installed — proof compilation cannot be validated. SLM generates candidates only.
 
-2. **Lean proof attempt pipeline** — after generating sorry stubs, submit to SLM for proof terms.
-   Replace `sorry` with the SLM response, re-run `scan_lean_workspace` to verify the sorry count drops.
-   Blocked on Lean/Lake not installed — proof compilation cannot be validated until `lake build` runs.
-
-3. **CI artifact** — `cargo build --release` + GitHub Actions workflow.
-
-4. **`project store` CLI integration** — persist contracts under a project slug for incremental re-verification.
-
-5. **`--format json` for `list` and `diff`** — extend JSON output to remaining subcommands.
+4. **Lean proof attempt pipeline** — after generating sorry stubs, submit to SLM for proof terms.
+   Blocked until Lean/Lake installed.
 
 ---
 

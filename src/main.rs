@@ -8,6 +8,7 @@ use tauto::contract_ir::{
 };
 use tauto::contract_parser::{extract_contract_blocks, parse_contract_block};
 use tauto::lean_gen::{generate_lean_workspace, scan_lean_workspace, write_lean_workspace};
+use tauto::project_store::{save_document, ContractDocument};
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
 enum OutputFormat {
@@ -61,6 +62,20 @@ enum Commands {
         #[arg(long)]
         strict: bool,
     },
+    /// Store contract documents under a project slug for incremental re-verification
+    Store {
+        /// Directory or file containing contract markdown (recursive)
+        path: PathBuf,
+        /// Project slug to store contracts under (normalized to lowercase-hyphen)
+        #[arg(long)]
+        project: String,
+        /// Root directory of the contract store
+        #[arg(long, default_value = "tauto-store")]
+        store_root: PathBuf,
+        /// Output format
+        #[arg(long, default_value = "text", value_enum)]
+        format: OutputFormat,
+    },
 }
 
 fn main() {
@@ -72,6 +87,9 @@ fn main() {
         Commands::Hash { path, format } => run_hash(&path, &format),
         Commands::List { path } => run_list(&path),
         Commands::Diff { base, new, strict } => run_diff(&base, &new, strict),
+        Commands::Store { path, project, store_root, format } => {
+            run_store(&path, &project, &store_root, &format)
+        }
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
@@ -288,6 +306,59 @@ fn run_diff(
 
     if strict && !diff.is_expansion_only {
         std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn run_store(
+    path: &PathBuf,
+    project: &str,
+    store_root: &PathBuf,
+    format: &OutputFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let files = collect_markdown_files(path)?;
+    if files.is_empty() {
+        eprintln!("No markdown files found in {}", path.display());
+        return Ok(());
+    }
+
+    let mut stored_paths = Vec::new();
+    for file_path in &files {
+        let content = std::fs::read_to_string(file_path)?;
+        let file_name = file_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown.md")
+            .to_owned();
+        let title = file_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| {
+                let mut chars = s.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                }
+            })
+            .unwrap_or_else(|| file_name.clone());
+        let doc = ContractDocument::new(project, &file_name, title, content);
+        let stored = save_document(store_root, &doc)?;
+        stored_paths.push(stored.display().to_string());
+    }
+
+    if *format == OutputFormat::Json {
+        let json = serde_json::json!({
+            "project": project,
+            "stored": stored_paths,
+        });
+        println!("{}", serde_json::to_string_pretty(&json)?);
+        return Ok(());
+    }
+
+    println!("Stored {} file(s) for project '{project}':", stored_paths.len());
+    for p in &stored_paths {
+        println!("  {p}");
     }
 
     Ok(())
