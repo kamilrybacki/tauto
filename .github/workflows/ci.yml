@@ -50,6 +50,34 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  lean-verify:
+    name: Lean workspace verification
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artefacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build tauto binary
+        run: cargo build --release
+
+      - name: Install elan and Lean toolchain
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain leanprover/lean4:stable
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Generate workspace and verify with lake build
+        run: |
+          ./target/release/tauto verify tests/fixtures/orders.md \
+            --output /tmp/lean-workspace \
+            --lean-check
+
   release:
     name: GitHub Release
     runs-on: ubuntu-latest

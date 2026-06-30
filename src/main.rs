@@ -8,7 +8,8 @@ use tauto::contract_ir::{
 };
 use tauto::contract_parser::{extract_contract_blocks, parse_contract_block};
 use tauto::lean_gen::{
-    LeanWorkspace, generate_lean_workspace, scan_lean_workspace, write_lean_workspace,
+    LakeError, LeanWorkspace, generate_lean_workspace, run_lake_build, scan_lean_workspace,
+    write_lean_workspace,
 };
 use tauto::project_store::{save_document, ContractDocument};
 use tauto::slm::{ArtifactKind, CodeGenerationRequest, DeepSeekProvider, SlmCodeGenerator};
@@ -44,6 +45,9 @@ enum Commands {
         /// Attempt SLM proof generation for sorry stubs (e.g. "deepseek")
         #[arg(long)]
         model: Option<String>,
+        /// Run `lake build` on the generated workspace to validate Lean 4 syntax
+        #[arg(long)]
+        lean_check: bool,
     },
     /// Print semantic and provenance hashes for a contract set (CI cache keys)
     Hash {
@@ -87,8 +91,8 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
-        Commands::Verify { path, output, strict, format, model } => {
-            run_verify(&path, &output, strict, &format, &model)
+        Commands::Verify { path, output, strict, format, model, lean_check } => {
+            run_verify(&path, &output, strict, &format, &model, lean_check)
         }
         Commands::Hash { path, format } => run_hash(&path, &format),
         Commands::List { path } => run_list(&path),
@@ -109,6 +113,7 @@ fn run_verify(
     strict: bool,
     format: &OutputFormat,
     model: &Option<String>,
+    lean_check: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (contract_set, parse_errors, file_count) = parse_contracts(path)?;
 
@@ -128,6 +133,16 @@ fn run_verify(
         None
     };
 
+    let lake_result = if lean_check {
+        let r = run_lake_build(output).map_err(|e| match e {
+            LakeError::NotFound => Box::<dyn std::error::Error>::from(e.to_string()),
+            LakeError::Io(io) => Box::<dyn std::error::Error>::from(io),
+        })?;
+        Some(r)
+    } else {
+        None
+    };
+
     if *format == OutputFormat::Json {
         let mut json = serde_json::json!({
             "contracts": contract_set.contracts.len(),
@@ -143,6 +158,9 @@ fn run_verify(
         if let Some(ref slm) = slm_result {
             json["slm_model"] = serde_json::Value::String(model.as_deref().unwrap_or("").to_owned());
             json["slm_sorry_count"] = serde_json::json!(slm.remaining_sorrys);
+        }
+        if let Some(ref lake) = lake_result {
+            json["lean_build_success"] = serde_json::json!(lake.success);
         }
         println!("{}", serde_json::to_string_pretty(&json)?);
         if strict && !diagnostics.is_empty() {
@@ -194,6 +212,20 @@ fn run_verify(
             diagnostics.len()
         );
         println!("SLM output written alongside workspace (*.slm.lean).");
+    }
+
+    if let Some(ref lake) = lake_result {
+        println!();
+        if lake.success {
+            println!("Lean build: OK — workspace compiles.");
+        } else {
+            println!("Lean build: FAILED");
+            if !lake.stderr.is_empty() {
+                for line in lake.stderr.lines().take(20) {
+                    println!("  {line}");
+                }
+            }
+        }
     }
 
     Ok(())

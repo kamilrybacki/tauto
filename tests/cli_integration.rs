@@ -209,6 +209,26 @@ fn diff_strict_exits_zero_when_expansion_only() {
         .success();
 }
 
+// ── verify --lean-check ───────────────────────────────────────────────────────
+
+#[test]
+fn verify_lean_check_fails_gracefully_when_lake_not_in_path() {
+    let out = tempfile::tempdir().unwrap();
+    tauto()
+        // Restrict PATH so lake binary is unreachable
+        .env("PATH", "/usr/bin:/bin")
+        .args([
+            "verify",
+            &fixture("orders.md"),
+            "--output",
+            out.path().to_str().unwrap(),
+            "--lean-check",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("lake"));
+}
+
 // ── verify --model ────────────────────────────────────────────────────────────
 
 #[test]

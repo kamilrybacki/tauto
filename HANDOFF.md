@@ -21,7 +21,7 @@ The Python prototype (Phases 0-2, 44 tests, 3 reviewed phases) is in git history
 ## Current State
 
 **Branch:** `tauto-phase-0-2`
-**Tests:** 143 passing (125 unit, 21 integration)
+**Tests:** 147 passing (128 unit, 22 integration)
 **Binary:** `cargo build` → `./target/debug/tauto`
 
 ### CLI Commands
@@ -163,7 +163,8 @@ src/
 | `project_store::models` | 4 |
 | `project_store::file_store` | 5 |
 | `slm::http_provider` | 4 |
-| **integration (cli_integration)** | **21** |
+| `lean_gen::lake` | 3 |
+| **integration (cli_integration)** | **22** |
 
 ---
 
@@ -200,12 +201,24 @@ src/
 - Release binary verified locally: 4.8 MB, all subcommands functional.
 - Uses `dtolnay/rust-toolchain@stable` + `Swatinem/rust-cache@v2` for fast CI.
 
-## Phase R6 — Next Steps
+## Phase R6 — Completed
 
-1. **`--format json` for `list` and `diff`** — extend JSON output to remaining subcommands (small, ~25 lines, same pattern as verify/hash).
+- **`--lean-check` flag** on `tauto verify` — calls `run_lake_build(output_path)` after writing workspace.
+  Reports `Lean build: OK` or `FAILED` (text) / `lean_build_success` (JSON).
+  Clear error when `lake` not in PATH: directs user to elan for installation.
+- **`src/lean_gen/lake.rs`** — `run_lake_build(path: &Path) -> Result<LakeBuildResult, LakeError>`;
+  maps `io::ErrorKind::NotFound` → `LakeError::NotFound` with elan install hint.
+- **`lean-verify` CI job** — installs elan + `leanprover/lean4:stable` on the GHA runner (ephemeral,
+  not user's machine), runs `tauto verify --lean-check` on fixture contracts, asserts exit 0.
+- 3 unit tests in `lean_gen::lake`; 1 integration test for missing lake binary.
 
-2. **Lean proof attempt pipeline** — validate generated proofs by running `lake build`.
-   Blocked until Lean/Lake installed.
+## Phase R7 — Next Steps
+
+1. **`--format json` for `list` and `diff`** — small, ~25 lines, completes JSON coverage.
+
+2. **Lean as hard dependency** — add `[package.metadata]` with `lean` as a required system dep;
+   check for `lake` at startup and fail with a clear error if missing (vs. only failing on `--lean-check`).
+   See user discussion: "require lean to be present on system already to use the binary."
 
 3. **Cross-platform CI** — add `macos-latest` matrix entry to `build` job.
 
