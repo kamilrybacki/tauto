@@ -1,4 +1,5 @@
 pub mod provider;
+pub mod stub;
 pub mod traceability;
 
 pub use provider::{
