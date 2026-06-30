@@ -209,6 +209,90 @@ fn diff_strict_exits_zero_when_expansion_only() {
         .success();
 }
 
+// ── list --format json ────────────────────────────────────────────────────────
+
+#[test]
+fn list_format_json_outputs_valid_json() {
+    let output = tauto()
+        .args(["list", &fixture("orders.md"), "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&text).expect("must be valid JSON");
+    assert_eq!(v["contracts"], 2);
+    assert_eq!(v["files"], 1);
+    assert!(v["items"].is_array());
+    assert_eq!(v["items"].as_array().unwrap().len(), 2);
+    assert_eq!(v["items"][0]["entity"], "Order");
+}
+
+#[test]
+fn list_format_json_items_have_entity_operation_case() {
+    let output = tauto()
+        .args(["list", &fixture("orders.md"), "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(output).unwrap()).unwrap();
+    let first = &v["items"][0];
+    assert!(first["entity"].is_string());
+    assert!(first["operation"].is_string());
+    assert!(first["case"].is_string());
+}
+
+// ── diff --format json ────────────────────────────────────────────────────────
+
+#[test]
+fn diff_format_json_expansion_reports_expansion_only_true() {
+    let output = tauto()
+        .args(["diff", &fixture("base"), &fixture("expanded"), "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(output).unwrap()).unwrap();
+    assert_eq!(v["expansion_only"], true);
+    assert_eq!(v["added"].as_array().unwrap().len(), 1);
+    assert!(v["removed"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn diff_format_json_narrowing_reports_expansion_only_false() {
+    let output = tauto()
+        .args(["diff", &fixture("expanded"), &fixture("base"), "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(output).unwrap()).unwrap();
+    assert_eq!(v["expansion_only"], false);
+    assert_eq!(v["removed"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn diff_format_json_includes_conflict_candidates_array() {
+    let output = tauto()
+        .args(["diff", &fixture("conflicts.md"), &fixture("conflicts.md"), "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(output).unwrap()).unwrap();
+    assert!(v["conflict_candidates"].is_array());
+}
+
 // ── verify --lean-check ───────────────────────────────────────────────────────
 
 #[test]

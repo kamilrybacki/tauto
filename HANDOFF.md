@@ -164,7 +164,7 @@ src/
 | `project_store::file_store` | 5 |
 | `slm::http_provider` | 4 |
 | `lean_gen::lake` | 3 |
-| **integration (cli_integration)** | **22** |
+| **integration (cli_integration)** | **27** |
 
 ---
 
@@ -212,15 +212,21 @@ src/
   not user's machine), runs `tauto verify --lean-check` on fixture contracts, asserts exit 0.
 - 3 unit tests in `lean_gen::lake`; 1 integration test for missing lake binary.
 
-## Phase R7 — Next Steps
+## Phase R7 — Completed
 
-1. **`--format json` for `list` and `diff`** — small, ~25 lines, completes JSON coverage.
+- **`--format json` for `list` and `diff`** — JSON coverage complete across all 4 subcommands.
+  - `list --format json` → `{ contracts, files, parse_errors, items: [{entity, operation, case, source}] }`
+  - `diff --format json` → `{ base_contracts, base_files, new_contracts, new_files, added, removed, modified, expansion_only, conflict_candidates }`
+  - Refactored `run_diff`: moved `compare` + conflict-candidate computation above format branch; eliminated duplication.
+  - 5 new integration tests (require Lean in PATH; run in `lean-verify` CI job).
 
-2. **Lean as hard dependency** — add `[package.metadata]` with `lean` as a required system dep;
-   check for `lake` at startup and fail with a clear error if missing (vs. only failing on `--lean-check`).
-   See user discussion: "require lean to be present on system already to use the binary."
+## Phase R8 — Next Steps
 
-3. **Cross-platform CI** — add `macos-latest` matrix entry to `build` job.
+1. **Ship: create git tag `v0.1.0`** — triggers the `release` CI job; produces GitHub Release with Linux binary.
+
+2. **Cross-platform CI matrix** — add `macos-latest` to `build` job.
+
+3. **`--format json` for `store`** — currently text-only; small change if needed.
 
 ---
 

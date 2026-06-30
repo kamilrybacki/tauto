@@ -61,6 +61,9 @@ enum Commands {
     List {
         /// Directory or file containing contract markdown (recursive)
         path: PathBuf,
+        /// Output format
+        #[arg(long, default_value = "text", value_enum)]
+        format: OutputFormat,
     },
     /// Structural diff between two contract sets, plus heuristic conflict candidates
     Diff {
@@ -71,6 +74,9 @@ enum Commands {
         /// Exit with code 1 if diff is not expansion-only (contracts/conditions removed)
         #[arg(long)]
         strict: bool,
+        /// Output format
+        #[arg(long, default_value = "text", value_enum)]
+        format: OutputFormat,
     },
     /// Store contract documents under a project slug for incremental re-verification
     Store {
@@ -101,8 +107,8 @@ fn main() {
             run_verify(&path, &output, strict, &format, &model, lean_check)
         }
         Commands::Hash { path, format } => run_hash(&path, &format),
-        Commands::List { path } => run_list(&path),
-        Commands::Diff { base, new, strict } => run_diff(&base, &new, strict),
+        Commands::List { path, format } => run_list(&path, &format),
+        Commands::Diff { base, new, strict, format } => run_diff(&base, &new, strict, &format),
         Commands::Store { path, project, store_root, format } => {
             run_store(&path, &project, &store_root, &format)
         }
@@ -267,8 +273,32 @@ fn run_hash(
     Ok(())
 }
 
-fn run_list(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn run_list(path: &PathBuf, format: &OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
     let (contract_set, parse_errors, file_count) = parse_contracts(path)?;
+
+    if *format == OutputFormat::Json {
+        let items: Vec<_> = contract_set
+            .contracts
+            .iter()
+            .map(|c| {
+                let source = c.source.as_ref().map(|s| format!("{}:{}", s.document_path, s.start_line));
+                serde_json::json!({
+                    "entity": c.entity,
+                    "operation": c.operation,
+                    "case": c.case,
+                    "source": source,
+                })
+            })
+            .collect();
+        let json = serde_json::json!({
+            "contracts": contract_set.contracts.len(),
+            "files": file_count,
+            "parse_errors": parse_errors,
+            "items": items,
+        });
+        println!("{}", serde_json::to_string_pretty(&json)?);
+        return Ok(());
+    }
 
     println!(
         "{} contract(s) from {} file(s) ({parse_errors} parse error(s)):",
@@ -291,9 +321,46 @@ fn run_diff(
     base_path: &PathBuf,
     new_path: &PathBuf,
     strict: bool,
+    format: &OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (base_set, _, base_files) = parse_contracts(base_path)?;
     let (new_set, _, new_files) = parse_contracts(new_path)?;
+    let diff = compare(&base_set, &new_set);
+
+    let changed_keys: std::collections::HashSet<String> = diff
+        .added
+        .iter()
+        .map(|c| format!("{}/{}/{}", c.entity, c.operation, c.case))
+        .chain(diff.modified.iter().map(|m| m.key.to_display()))
+        .collect();
+    let all_candidates = find_conflict_candidates(&new_set);
+    let conflict_candidates: Vec<_> = all_candidates
+        .iter()
+        .filter(|c| changed_keys.contains(&c.key_a) || changed_keys.contains(&c.key_b))
+        .collect();
+
+    if *format == OutputFormat::Json {
+        let json = serde_json::json!({
+            "base_contracts": base_set.contracts.len(),
+            "base_files": base_files,
+            "new_contracts": new_set.contracts.len(),
+            "new_files": new_files,
+            "added": diff.added.iter().map(|c| format!("{}/{}/{}", c.entity, c.operation, c.case)).collect::<Vec<_>>(),
+            "removed": diff.removed.iter().map(|c| format!("{}/{}/{}", c.entity, c.operation, c.case)).collect::<Vec<_>>(),
+            "modified": diff.modified.iter().map(|m| m.key.to_display()).collect::<Vec<_>>(),
+            "expansion_only": diff.is_expansion_only,
+            "conflict_candidates": conflict_candidates.iter().map(|c| serde_json::json!({
+                "key_a": c.key_a,
+                "key_b": c.key_b,
+                "reason": c.reason,
+            })).collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&json)?);
+        if strict && !diff.is_expansion_only {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
 
     println!(
         "Baseline: {} contract(s) from {} file(s)",
@@ -302,8 +369,6 @@ fn run_diff(
     );
     println!("New:      {} contract(s) from {} file(s)", new_set.contracts.len(), new_files);
     println!();
-
-    let diff = compare(&base_set, &new_set);
 
     if diff.is_empty() {
         println!("No structural changes.");
@@ -346,29 +411,14 @@ fn run_diff(
 
     println!("Expansion only: {}", if diff.is_expansion_only { "yes" } else { "no" });
 
-    // Conflict candidates: only those involving changed/new contracts
-    let changed_keys: std::collections::HashSet<String> = diff
-        .added
-        .iter()
-        .map(|c| format!("{}/{}/{}", c.entity, c.operation, c.case))
-        .chain(diff.modified.iter().map(|m| m.key.to_display()))
-        .collect();
-
-    if !changed_keys.is_empty() {
-        let all_candidates = find_conflict_candidates(&new_set);
-        let relevant: Vec<_> = all_candidates
-            .iter()
-            .filter(|c| changed_keys.contains(&c.key_a) || changed_keys.contains(&c.key_b))
-            .collect();
-        if !relevant.is_empty() {
-            println!();
-            println!("Conflict candidates involving changed contracts ({}):", relevant.len());
-            for c in &relevant {
-                println!("  [conflict] {} ↔ {}", c.key_a, c.key_b);
-                println!("    {}", c.reason);
-            }
-            println!("  Note: heuristic — Lean proof required for confirmation.");
+    if !conflict_candidates.is_empty() {
+        println!();
+        println!("Conflict candidates involving changed contracts ({}):", conflict_candidates.len());
+        for c in &conflict_candidates {
+            println!("  [conflict] {} ↔ {}", c.key_a, c.key_b);
+            println!("    {}", c.reason);
         }
+        println!("  Note: heuristic — Lean proof required for confirmation.");
     }
 
     if strict && !diff.is_expansion_only {
