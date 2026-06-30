@@ -23,6 +23,7 @@ Python import roots use `tauto_*` package names to keep boundaries explicit:
 - `tauto_contract_ir`
 - `tauto_contract_parser`
 - `tauto_project_store`
+- `tauto_slm`
 
 ## Architecture
 
@@ -37,6 +38,31 @@ The core is functional:
 
 This keeps behavior testable without a database, API server, worker, or Lean installation.
 
+## SLM Code Generation Boundary
+
+SLM support is required for AST/IR-to-code generation and must be provider agnostic. Tauto depends on a small Tauto-owned interface, not on OpenAI, Anthropic, Deepseek, local model runtimes, self-trained models, or any other provider SDK directly.
+
+The generation path combines deterministic preprocessing with provider-backed generation:
+
+```text
+ContractSet / normalized AST
+  -> deterministic preprocessing context
+  -> provider-neutral SLM request
+  -> provider adapter
+  -> generated code artifacts
+  -> deterministic validation / tests / reports
+```
+
+The provider-neutral boundary exposes typed AST-codegen operations, including:
+
+- generate validators from normalized AST/IR;
+- generate tests from normalized AST/IR;
+- generate implementation scaffolds when explicitly requested;
+- explain parser, Lean, or implementation-test diagnostics;
+- suggest proof or contract edits for human review.
+
+Provider adapters translate that interface to specific services such as a self-trained model, a locally hosted model, or an external provider such as Deepseek Flash. The deterministic core must never call provider SDKs directly. Generated artifacts must include provider metadata and remain traceable to the input `ContractSet`, deterministic preprocessing context, generator intent, and later validation results.
+
 ## Data Flow
 
 ```text
@@ -47,6 +73,8 @@ Markdown document
   -> ContractSet
   -> canonical_contract_json / canonical_contract_set_json
   -> stable SHA-256 hashes
+  -> deterministic preprocessing context
+  -> provider-neutral SLM code generation request
 ```
 
 The `ContractSet` type exists from the beginning so later phases can validate an incoming business case against the full accepted base of contracts and invariants.
@@ -130,6 +158,7 @@ This slice does not implement:
 - Lean safety scanning;
 - runtime validator generation;
 - implementation conformance tests;
+- concrete SLM provider adapters;
 - GitHub/GitLab integration.
 
 ## Acceptance Criteria
@@ -141,4 +170,5 @@ This slice does not implement:
 - The MVP DSL can parse `CancelPaidOrder`.
 - A zero-contract project is valid.
 - Contract IR and ContractSet JSON are deterministic and hashable.
+- The SLM code-generation boundary is provider agnostic and consumes normalized AST/IR.
 - All implemented behavior is covered by focused tests written first.

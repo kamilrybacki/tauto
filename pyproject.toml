@@ -22,6 +22,7 @@ packages = [
   "src/tauto_contract_ir",
   "src/tauto_contract_parser",
   "src/tauto_project_store",
+  "src/tauto_slm",
 ]
 
 [tool.pytest.ini_options]

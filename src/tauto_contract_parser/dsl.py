@@ -23,6 +23,17 @@ SectionName = Literal[
     "preserves",
     "assumes",
 ]
+ALLOWED_SECTIONS = frozenset(
+    {
+        "entity",
+        "operation",
+        "requires",
+        "ensures",
+        "forbidden",
+        "preserves",
+        "assumes",
+    }
+)
 
 CONDITION_RE = re.compile(r"^(.+?)\s*(==|!=|>=|<=|>|<)\s*(.+)$")
 CALL_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\((.*)\)$")
@@ -50,7 +61,19 @@ def parse_contract_block(block: ContractBlock) -> ParseResult:
             case_name = stripped.removeprefix("case ").strip()
             continue
         if stripped.endswith(":"):
-            current_section = stripped.removesuffix(":")
+            section = stripped.removesuffix(":")
+            if section not in ALLOWED_SECTIONS:
+                diagnostics.append(
+                    Diagnostic(
+                        category="parse_error",
+                        message=f"Unknown section: {section}",
+                        document_path=block.source.document_path,
+                        line=line_number,
+                    )
+                )
+                current_section = None
+                continue
+            current_section = section
             sections.setdefault(current_section, [])
             continue
         if current_section is None:

@@ -86,3 +86,24 @@ requires:
 
     assert parsed.contract is None
     assert parsed.diagnostics[0].line == 10
+
+
+def test_parse_reports_unknown_section() -> None:
+    block = ContractBlock(
+        raw_block="""case CancelPaidOrder
+entity:
+  Order
+operation:
+  cancelOrder
+requirez:
+  order.status == Paid
+""",
+        source=SourceLocation(document_path="rules.md", start_line=1, end_line=7),
+    )
+
+    parsed = parse_contract_block(block)
+
+    assert parsed.contract is None
+    assert parsed.diagnostics[0].category == "parse_error"
+    assert parsed.diagnostics[0].line == 6
+    assert "Unknown section" in parsed.diagnostics[0].message
