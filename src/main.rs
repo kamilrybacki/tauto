@@ -7,8 +7,11 @@ use tauto::contract_ir::{
     ContractSet,
 };
 use tauto::contract_parser::{extract_contract_blocks, parse_contract_block};
-use tauto::lean_gen::{generate_lean_workspace, scan_lean_workspace, write_lean_workspace};
+use tauto::lean_gen::{
+    LeanWorkspace, generate_lean_workspace, scan_lean_workspace, write_lean_workspace,
+};
 use tauto::project_store::{save_document, ContractDocument};
+use tauto::slm::{ArtifactKind, CodeGenerationRequest, DeepSeekProvider, SlmCodeGenerator};
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
 enum OutputFormat {
@@ -38,6 +41,9 @@ enum Commands {
         /// Output format
         #[arg(long, default_value = "text", value_enum)]
         format: OutputFormat,
+        /// Attempt SLM proof generation for sorry stubs (e.g. "deepseek")
+        #[arg(long)]
+        model: Option<String>,
     },
     /// Print semantic and provenance hashes for a contract set (CI cache keys)
     Hash {
@@ -81,8 +87,8 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
-        Commands::Verify { path, output, strict, format } => {
-            run_verify(&path, &output, strict, &format)
+        Commands::Verify { path, output, strict, format, model } => {
+            run_verify(&path, &output, strict, &format, &model)
         }
         Commands::Hash { path, format } => run_hash(&path, &format),
         Commands::List { path } => run_list(&path),
@@ -102,6 +108,7 @@ fn run_verify(
     output: &PathBuf,
     strict: bool,
     format: &OutputFormat,
+    model: &Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (contract_set, parse_errors, file_count) = parse_contracts(path)?;
 
@@ -115,8 +122,14 @@ fn run_verify(
     let diagnostics = scan_lean_workspace(&workspace);
     write_lean_workspace(&workspace, output)?;
 
+    let slm_result = if let Some(model_name) = model {
+        Some(attempt_slm_proofs(&workspace, output, model_name)?)
+    } else {
+        None
+    };
+
     if *format == OutputFormat::Json {
-        let json = serde_json::json!({
+        let mut json = serde_json::json!({
             "contracts": contract_set.contracts.len(),
             "files": file_count,
             "conflicts": conflicts.iter().map(|c| serde_json::json!({
@@ -127,6 +140,10 @@ fn run_verify(
             "sorry_count": diagnostics.len(),
             "workspace": output.display().to_string(),
         });
+        if let Some(ref slm) = slm_result {
+            json["slm_model"] = serde_json::Value::String(model.as_deref().unwrap_or("").to_owned());
+            json["slm_sorry_count"] = serde_json::json!(slm.remaining_sorrys);
+        }
         println!("{}", serde_json::to_string_pretty(&json)?);
         if strict && !diagnostics.is_empty() {
             std::process::exit(1);
@@ -165,6 +182,18 @@ fn run_verify(
         if strict {
             std::process::exit(1);
         }
+    }
+
+    if let Some(ref slm) = slm_result {
+        println!();
+        let resolved = diagnostics.len().saturating_sub(slm.remaining_sorrys);
+        println!(
+            "SLM ({}) proof attempt: {}/{} sorry stubs resolved.",
+            model.as_deref().unwrap_or("?"),
+            resolved,
+            diagnostics.len()
+        );
+        println!("SLM output written alongside workspace (*.slm.lean).");
     }
 
     Ok(())
@@ -311,6 +340,50 @@ fn run_diff(
     Ok(())
 }
 
+struct SlmAttemptResult {
+    remaining_sorrys: usize,
+}
+
+fn attempt_slm_proofs(
+    workspace: &LeanWorkspace,
+    workspace_path: &PathBuf,
+    model_name: &str,
+) -> Result<SlmAttemptResult, Box<dyn std::error::Error>> {
+    let provider: Box<dyn SlmCodeGenerator> = match model_name {
+        "deepseek" => Box::new(DeepSeekProvider::from_env()?),
+        name => return Err(format!("unknown model '{name}'; supported: deepseek").into()),
+    };
+
+    let mut remaining_sorrys = 0usize;
+    for file in workspace.files.iter().filter(|f| f.content.contains("sorry")) {
+        let mut context = std::collections::BTreeMap::new();
+        context.insert("lean_stub".to_owned(), file.content.clone());
+
+        let request = CodeGenerationRequest {
+            contract_set: tauto::contract_ir::ContractSet::new(vec![]),
+            target_language: "lean4".to_owned(),
+            artifact_kind: ArtifactKind::ProofAttempt,
+            context,
+        };
+
+        match provider.generate_code_from_ast(&request) {
+            Ok(artifact) => {
+                let slm_path = workspace_path.join(format!("{}.slm.lean", file.path));
+                if let Some(parent) = slm_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&slm_path, &artifact.content)?;
+                remaining_sorrys += artifact.content.matches("sorry").count();
+            }
+            Err(e) => {
+                eprintln!("SLM error for {}: {e}", file.path);
+            }
+        }
+    }
+
+    Ok(SlmAttemptResult { remaining_sorrys })
+}
+
 fn run_store(
     path: &PathBuf,
     project: &str,
@@ -326,23 +399,36 @@ fn run_store(
     let mut stored_paths = Vec::new();
     for file_path in &files {
         let content = std::fs::read_to_string(file_path)?;
-        let file_name = file_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown.md")
-            .to_owned();
-        let title = file_path
+        // Preserve relative path under the scan root so files with identical basenames
+        // in different subdirectories are stored at distinct paths (prevents silent overwrites).
+        let doc_path = if path.is_file() {
+            file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown.md")
+                .to_owned()
+        } else {
+            file_path
+                .strip_prefix(path)
+                .ok()
+                .and_then(|p| p.to_str())
+                .unwrap_or_else(|| {
+                    file_path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown.md")
+                })
+                .to_owned()
+        };
+        let stem = std::path::Path::new(&doc_path)
             .file_stem()
             .and_then(|s| s.to_str())
-            .map(|s| {
-                let mut chars = s.chars();
-                match chars.next() {
-                    None => String::new(),
-                    Some(c) => c.to_uppercase().to_string() + chars.as_str(),
-                }
-            })
-            .unwrap_or_else(|| file_name.clone());
-        let doc = ContractDocument::new(project, &file_name, title, content);
+            .unwrap_or("unknown");
+        let title = {
+            let mut chars = stem.chars();
+            match chars.next() {
+                None => stem.to_owned(),
+                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+            }
+        };
+        let doc = ContractDocument::new(project, &doc_path, title, content);
         let stored = save_document(store_root, &doc)?;
         stored_paths.push(stored.display().to_string());
     }

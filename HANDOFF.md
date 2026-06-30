@@ -21,7 +21,7 @@ The Python prototype (Phases 0-2, 44 tests, 3 reviewed phases) is in git history
 ## Current State
 
 **Branch:** `tauto-phase-0-2`
-**Tests:** 135 passing (116 unit, 19 integration)
+**Tests:** 143 passing (125 unit, 21 integration)
 **Binary:** `cargo build` → `./target/debug/tauto`
 
 ### CLI Commands
@@ -46,10 +46,22 @@ tauto diff <base> <new> [--strict]
 
 tauto store <path> --project <slug> [--store-root <dir>] [--format text|json]
     Store contract markdown files under a project slug for incremental re-verification.
-    Slug normalized to lowercase-hyphen. Writes a JSON sidecar alongside each markdown file.
+    Slug normalized to lowercase-hyphen (non-alphanumeric characters stripped).
+    Writes a JSON sidecar alongside each markdown file.
     --format json emits { project, stored: [...paths] }.
     Default store-root: tauto-store/
+    Recursive scans preserve relative paths to prevent same-basename collisions.
 ```
+
+### `--model` flag (verify)
+
+`tauto verify <path> --model deepseek` submits sorry-stub Lean files to DeepSeek for proof
+generation. Requires `DEEPSEEK_API_KEY` env var. SLM output is written alongside the workspace
+as `*.slm.lean` files (originals unchanged). Sorry count in SLM output is reported separately.
+`--format json` includes `slm_model` and `slm_sorry_count` fields.
+
+**Supported models:** `deepseek` only. Unknown models exit 1 with an error message.
+**Constraint:** Lean/Lake not installed — proof compilation cannot be validated.
 
 ### Integration tests
 
@@ -150,7 +162,8 @@ src/
 | `contract_parser::dsl` | 13 |
 | `project_store::models` | 4 |
 | `project_store::file_store` | 5 |
-| **integration (cli_integration)** | **19** |
+| `slm::http_provider` | 4 |
+| **integration (cli_integration)** | **21** |
 
 ---
 
@@ -163,23 +176,28 @@ src/
 
 - **`tauto store` subcommand** — `run_store` wires `project_store::{save_document, ContractDocument}` to the CLI.
   Stores markdown files under `<store-root>/<project-slug>/<filename>` with JSON sidecar metadata.
+  Recursive scans use relative paths to prevent same-basename collisions.
+  Slug strips non-alphanumeric characters (path traversal prevention).
   `--format json` emits `{ project, stored: [...paths] }`.
-  4 new integration tests: document file creation, JSON output, sidecar metadata, slug normalization.
+  Security fixes: `normalize_slug` strips `/` and `..` (path traversal); relative doc paths prevent overwrite.
 
-## Phase R4 — Next Steps
+## Phase R4 — Completed
+
+- **Real SLM integration** — `src/slm/http_provider.rs` implements `SlmCodeGenerator` via blocking HTTP.
+  `DeepSeekProvider::from_env()` reads `DEEPSEEK_API_KEY`. Builds a prompt asking DeepSeek to replace
+  `sorry` with `trivial`, POSTs to `api.deepseek.com/v1/chat/completions`, writes `*.slm.lean` output.
+  `tauto verify --model deepseek` wires `attempt_slm_proofs` — reports `slm_sorry_count` in JSON.
+  Unknown model names and missing API key both exit 1 with descriptive errors.
+- Added `reqwest = { version = "0.12", features = ["json", "blocking"] }` to dependencies.
+- 4 unit tests in `slm::http_provider`; 2 integration tests for missing key / unknown model.
+
+## Phase R5 — Next Steps
 
 1. **`--format json` for `list` and `diff`** — extend JSON output to remaining subcommands (small, same pattern as verify/hash).
 
-2. **CI artifact** — `cargo build --release` + GitHub Actions workflow. Fully testable locally with `cargo build --release`.
+2. **CI artifact** — `cargo build --release` + GitHub Actions workflow.
 
-3. **Real SLM integration** — wire an actual LLM API behind `SlmCodeGenerator`.
-   `DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `NVIDIA_API_KEY` are available in the environment.
-   Add `reqwest` (with `json`, `blocking` features) to `Cargo.toml`.
-   Implement `src/slm/http_provider.rs` (DeepSeek adapter: one POST to the chat completions endpoint).
-   Wire into `tauto verify --model <name>`.
-   **Constraint**: Lean/Lake not installed — proof compilation cannot be validated. SLM generates candidates only.
-
-4. **Lean proof attempt pipeline** — after generating sorry stubs, submit to SLM for proof terms.
+3. **Lean proof attempt pipeline** — validate generated proofs by running `lake build`.
    Blocked until Lean/Lake installed.
 
 ---

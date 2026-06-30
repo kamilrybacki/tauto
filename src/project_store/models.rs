@@ -1,5 +1,10 @@
 fn normalize_slug(s: &str) -> String {
-    s.trim().to_lowercase().replace(' ', "-")
+    s.trim()
+        .to_lowercase()
+        .replace(' ', "-")
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-')
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -209,6 +209,43 @@ fn diff_strict_exits_zero_when_expansion_only() {
         .success();
 }
 
+// ── verify --model ────────────────────────────────────────────────────────────
+
+#[test]
+fn verify_model_unknown_exits_with_error() {
+    let out = tempfile::tempdir().unwrap();
+    tauto()
+        .args([
+            "verify",
+            &fixture("orders.md"),
+            "--output",
+            out.path().to_str().unwrap(),
+            "--model",
+            "gpt-4-turbo",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown model"));
+}
+
+#[test]
+fn verify_model_deepseek_without_api_key_exits_with_error() {
+    let out = tempfile::tempdir().unwrap();
+    tauto()
+        .env_remove("DEEPSEEK_API_KEY")
+        .args([
+            "verify",
+            &fixture("orders.md"),
+            "--output",
+            out.path().to_str().unwrap(),
+            "--model",
+            "deepseek",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("DEEPSEEK_API_KEY"));
+}
+
 // ── store ─────────────────────────────────────────────────────────────────────
 
 #[test]
@@ -287,4 +324,44 @@ fn store_slug_normalizes_spaces_to_hyphens() {
         .assert()
         .success();
     assert!(store.path().join("my-project").exists());
+}
+
+#[test]
+fn store_slug_strips_path_traversal_characters() {
+    let store = tempfile::tempdir().unwrap();
+    tauto()
+        .args([
+            "store",
+            &fixture("orders.md"),
+            "--project",
+            "../outside",
+            "--store-root",
+            store.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    // "../outside" normalizes to "outside" — the ".." and "/" are stripped
+    assert!(store.path().join("outside").exists(), "traversal sequences must be stripped from slug");
+    assert!(!store.path().parent().unwrap().join("outside").exists(), "must not escape store root");
+}
+
+#[test]
+fn store_recursive_preserves_relative_paths_to_avoid_collision() {
+    let store = tempfile::tempdir().unwrap();
+    // "base" and "mirror" both contain orders.md — relative paths prevent silent overwrite
+    tauto()
+        .args([
+            "store",
+            "tests/fixtures",
+            "--project",
+            "all-contracts",
+            "--store-root",
+            store.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    let proj = store.path().join("all-contracts");
+    // base/orders.md and mirror/orders.md must be stored at distinct paths
+    assert!(proj.join("base").join("orders.md").exists(), "base/orders.md must be stored");
+    assert!(proj.join("mirror").join("orders.md").exists(), "mirror/orders.md must be stored");
 }
