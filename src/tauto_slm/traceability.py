@@ -1,9 +1,12 @@
 from pydantic import BaseModel, ConfigDict
 
-from tauto_contract_ir.models import ContractSet
-from tauto_contract_ir.serialization import semantic_contract_set_hash
 from tauto_preprocessing.context_builder import DeterministicContext
 from tauto_slm.provider import ArtifactKind, SlmProviderRef
+
+__all__ = [
+    "ArtifactTraceability",
+    "build_traceability",
+]
 
 
 class ArtifactTraceability(BaseModel):
@@ -18,14 +21,13 @@ class ArtifactTraceability(BaseModel):
 
 def build_traceability(
     *,
-    contract_set: ContractSet,
     provider: SlmProviderRef,
     target_language: str,
     artifact_kind: ArtifactKind,
     deterministic_context: DeterministicContext,
 ) -> ArtifactTraceability:
     return ArtifactTraceability(
-        contract_set_hash=semantic_contract_set_hash(contract_set),
+        contract_set_hash=deterministic_context.entries["contract_set_hash"],
         provider=provider,
         target_language=target_language,
         artifact_kind=artifact_kind,

@@ -1,5 +1,6 @@
 from tauto_contract_ir.models import ContractIR, ContractSet
 from tauto_preprocessing.context_builder import build_deterministic_context
+
 from tauto_slm.traceability import ArtifactTraceability, build_traceability
 from tauto_slm.provider import ArtifactKind, SlmProviderRef
 
@@ -18,7 +19,6 @@ def test_traceability_carries_all_metadata() -> None:
     cs = _make_set()
     ctx = build_deterministic_context(cs, generator_intent="lean_verification")
     t = build_traceability(
-        contract_set=cs,
         provider=_provider(),
         target_language="lean4",
         artifact_kind="validator",
@@ -36,7 +36,6 @@ def test_traceability_is_immutable() -> None:
     cs = _make_set()
     ctx = build_deterministic_context(cs, generator_intent="lean_verification")
     t = build_traceability(
-        contract_set=cs,
         provider=_provider(),
         target_language="lean4",
         artifact_kind="validator",
@@ -56,14 +55,12 @@ def test_traceability_differs_on_provider_change() -> None:
     cs = _make_set()
     ctx = build_deterministic_context(cs, generator_intent="lean_verification")
     t_a = build_traceability(
-        contract_set=cs,
         provider=SlmProviderRef(name="deepseek", model="v2"),
         target_language="lean4",
         artifact_kind="validator",
         deterministic_context=ctx,
     )
     t_b = build_traceability(
-        contract_set=cs,
         provider=SlmProviderRef(name="anthropic", model="claude-opus-4-8"),
         target_language="lean4",
         artifact_kind="validator",
