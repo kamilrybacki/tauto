@@ -1,0 +1,63 @@
+image:
+  repository: ghcr.io/your-org/tauto
+  tag: ""          # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+# How contracts reach the container.
+# "hostPath"  — mount a directory from the k3s node (default; single-node homelab)
+# "pvc"       — use an existing or dynamically-provisioned PersistentVolumeClaim
+# "configmap" — embed small contracts inline (≤1 MB ConfigMap limit)
+contracts:
+  source: hostPath
+
+  hostPath:
+    path: /opt/tauto/contracts   # absolute path on the k3s node
+
+  pvc:
+    existingClaim: ""            # leave empty to create one
+    storageClass: local-path     # k3s default
+    accessMode: ReadWriteOnce
+    size: 1Gi
+
+  # Only used when source=configmap.
+  # Key = filename (must end in .md), value = file content.
+  configmap:
+    files: {}
+    # Example:
+    # files:
+    #   orders.md: |
+    #     ```contract
+    #     case CancelPaidOrder
+    #     entity:
+    #       Order
+    #     ...
+    #     ```
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 4000
+
+ingress:
+  enabled: true
+  ingressClassName: caddy        # change to "nginx" etc. if needed
+  host: tauto.homelab.local
+  tls: []
+  # tls:
+  #   - hosts:
+  #       - tauto.homelab.local
+  #     secretName: tauto-tls
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+# Extra environment variables injected into the container.
+env: {}
+# env:
+#   MY_VAR: value
