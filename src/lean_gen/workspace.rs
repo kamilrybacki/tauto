@@ -68,12 +68,27 @@ fn theorem_stub(kind: &str, conditions: &[Condition], op_ident: &str) -> String 
     lines.join("\n")
 }
 
+fn comment_block(header: &str, items: &[String]) -> String {
+    let mut lines = vec![format!("-- {header}:")];
+    for item in items {
+        lines.push(format!("--   {item}"));
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 fn contract_file(contract: &ContractIR, module_name: &str) -> LeanWorkspaceFile {
     let op_ident = lean_ident(&contract.operation);
     let mut body = vec![
         format!("namespace Tauto.Contracts.{module_name}"),
         String::new(),
     ];
+    if !contract.assumes.is_empty() {
+        body.push(comment_block("Assumed preconditions", &contract.assumes));
+    }
+    if !contract.preserves.is_empty() {
+        body.push(comment_block("Preserved invariants", &contract.preserves));
+    }
     if !contract.requires.is_empty() {
         body.push(theorem_stub("requires", &contract.requires, &op_ident));
     }
@@ -257,5 +272,62 @@ mod tests {
         let ws = generate_lean_workspace(&cs);
         let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
         assert!(f.path.contains("Contract"), "empty-after-sanitize must fall back to 'Contract'");
+    }
+
+    // lean_ident strips underscores, so disambiguation suffixes (_1, _2, …) can never
+    // be produced by any case string — the suffix namespace is disjoint from the base namespace.
+    #[test]
+    fn suffix_namespace_is_disjoint_from_base_namespace() {
+        // "AB_1" sanitizes to "AB1", not "AB_1", so it cannot collide with the
+        // disambiguation suffix produced for a second "AB".
+        let cs = ContractSet::new(vec![
+            ContractIR::new("AB", "E", "op"),
+            ContractIR::new("AB", "E", "op"),
+            ContractIR::new("AB_1", "E", "op"),  // lean_ident → "AB1", not "AB_1"
+        ]);
+        let ws = generate_lean_workspace(&cs);
+        let paths: Vec<_> =
+            ws.files.iter().filter(|f| f.path.starts_with("contracts/")).collect();
+        assert_eq!(paths.len(), 3);
+        let unique: std::collections::HashSet<_> = paths.iter().map(|f| &f.path).collect();
+        assert_eq!(unique.len(), 3, "all three paths must be distinct");
+    }
+
+    #[test]
+    fn preserves_rendered_as_comment_block() {
+        let cs = ContractSet::new(vec![ContractIR {
+            case: "Foo".to_owned(),
+            entity: "E".to_owned(),
+            operation: "op".to_owned(),
+            requires: vec![],
+            ensures: vec![],
+            forbidden: vec![],
+            preserves: vec!["order.history.size > 0".to_owned()],
+            assumes: vec![],
+            source: None,
+        }]);
+        let ws = generate_lean_workspace(&cs);
+        let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
+        assert!(f.content.contains("-- Preserved invariants:"));
+        assert!(f.content.contains("--   order.history.size > 0"));
+    }
+
+    #[test]
+    fn assumes_rendered_as_comment_block() {
+        let cs = ContractSet::new(vec![ContractIR {
+            case: "Foo".to_owned(),
+            entity: "E".to_owned(),
+            operation: "op".to_owned(),
+            requires: vec![],
+            ensures: vec![],
+            forbidden: vec![],
+            preserves: vec![],
+            assumes: vec!["payment.verified == true".to_owned()],
+            source: None,
+        }]);
+        let ws = generate_lean_workspace(&cs);
+        let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
+        assert!(f.content.contains("-- Assumed preconditions:"));
+        assert!(f.content.contains("--   payment.verified == true"));
     }
 }
