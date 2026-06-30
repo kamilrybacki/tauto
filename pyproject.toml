@@ -21,6 +21,8 @@ build-backend = "hatchling.build"
 packages = [
   "src/tauto_contract_ir",
   "src/tauto_contract_parser",
+  "src/tauto_lean_gen",
+  "src/tauto_preprocessing",
   "src/tauto_project_store",
   "src/tauto_slm",
 ]

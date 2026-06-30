@@ -12,6 +12,8 @@ from tauto_contract_ir.serialization import (
     canonical_contract_set_json,
     contract_hash,
     contract_set_hash,
+    semantic_contract_set_hash,
+    semantic_contract_set_json,
 )
 
 __all__ = [
@@ -26,4 +28,6 @@ __all__ = [
     "canonical_contract_set_json",
     "contract_hash",
     "contract_set_hash",
+    "semantic_contract_set_hash",
+    "semantic_contract_set_json",
 ]
