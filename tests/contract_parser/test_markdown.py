@@ -23,5 +23,5 @@ entity:
     assert len(blocks) == 1
     assert blocks[0].raw_block == "case CancelPaidOrder\n\nentity:\n  Order"
     assert blocks[0].source.document_path == "rules.md"
-    assert blocks[0].source.start_line == 5
+    assert blocks[0].source.start_line == 6
     assert blocks[0].source.end_line == 9

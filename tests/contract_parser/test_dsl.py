@@ -1,6 +1,6 @@
 from tauto_contract_ir.models import SourceLocation
 from tauto_contract_parser.dsl import parse_contract_block
-from tauto_contract_parser.markdown import ContractBlock
+from tauto_contract_parser.markdown import ContractBlock, extract_contract_blocks
 
 
 def test_parse_cancel_paid_order_contract() -> None:
@@ -65,3 +65,24 @@ requires:
     assert parsed.diagnostics[0].category == "parse_error"
     assert parsed.diagnostics[0].line == 16
     assert "Malformed condition" in parsed.diagnostics[0].message
+
+
+def test_parse_reports_line_number_from_extracted_markdown() -> None:
+    markdown = """# Cancel
+
+```contract
+case CancelPaidOrder
+entity:
+  Order
+operation:
+  cancelOrder
+requires:
+  order.status Paid
+```
+"""
+
+    block = extract_contract_blocks(markdown, "rules.md")[0]
+    parsed = parse_contract_block(block)
+
+    assert parsed.contract is None
+    assert parsed.diagnostics[0].line == 10

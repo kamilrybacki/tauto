@@ -20,7 +20,7 @@ def extract_contract_blocks(markdown: str, document_path: str) -> list[ContractB
     for index, line in enumerate(lines, start=1):
         if not in_block and line.strip() == "```contract":
             in_block = True
-            start_line = index
+            start_line = index + 1
             block_lines = []
             continue
 
