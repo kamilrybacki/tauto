@@ -2,7 +2,7 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from tauto_contract_ir.models import Condition, ContractIR, ContractSet, Expression
+from tauto_contract_ir import Condition, ContractIR, ContractSet, Expression
 
 _NON_IDENT_RE = re.compile(r"[^A-Za-z0-9]")
 

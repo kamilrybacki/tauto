@@ -1,17 +1,16 @@
 import hashlib
 import json
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
-from tauto_contract_ir.models import ContractSet
-from tauto_contract_ir.serialization import semantic_contract_set_hash
+from tauto_contract_ir import ContractSet, semantic_contract_set_hash
 
 
 class DeterministicContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    entries: dict[str, str] = Field(default_factory=dict)
-    context_hash: str = ""
+    entries: dict[str, str]
+    context_hash: str
 
 
 def build_deterministic_context(
