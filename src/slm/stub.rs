@@ -9,6 +9,12 @@ pub struct DeterministicStubProvider {
     pub ref_: SlmProviderRef,
 }
 
+impl Default for DeterministicStubProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeterministicStubProvider {
     pub fn new() -> Self {
         Self {

@@ -41,10 +41,17 @@ fn assign_module_names(contracts: &[ContractIR]) -> Vec<String> {
 }
 
 fn render_expr(expr: &Expression) -> String {
-    match &expr.value {
-        ExpressionValue::Str(s) => s.clone(),
-        ExpressionValue::Int(n) => n.to_string(),
-        ExpressionValue::Bool(b) => b.to_string(),
+    match (expr.kind.as_str(), &expr.value) {
+        // Lean 4 enum constructors use dot-notation when the type is inferrable
+        ("enum", ExpressionValue::Str(s)) => format!(".{s}"),
+        // Bool literals are lowercase in Lean 4 — Rust's Display already does this
+        ("bool", ExpressionValue::Bool(b)) => b.to_string(),
+        // Int / Nat literals
+        ("int", ExpressionValue::Int(n)) => n.to_string(),
+        // Field accessors and variables render as-is
+        (_, ExpressionValue::Str(s)) => s.clone(),
+        (_, ExpressionValue::Int(n)) => n.to_string(),
+        (_, ExpressionValue::Bool(b)) => b.to_string(),
     }
 }
 
@@ -159,6 +166,41 @@ mod tests {
             operator: op.to_owned(),
             right: str_expr("enum", right),
         }
+    }
+
+    #[test]
+    fn enum_expr_renders_with_dot_prefix() {
+        let expr = Expression { kind: "enum".to_owned(), value: ExpressionValue::Str("Paid".to_owned()) };
+        assert_eq!(render_expr(&expr), ".Paid");
+    }
+
+    #[test]
+    fn field_expr_renders_without_dot_prefix() {
+        let expr = Expression { kind: "field".to_owned(), value: ExpressionValue::Str("order.status".to_owned()) };
+        assert_eq!(render_expr(&expr), "order.status");
+    }
+
+    #[test]
+    fn bool_expr_renders_lowercase() {
+        let t = Expression { kind: "bool".to_owned(), value: ExpressionValue::Bool(true) };
+        let f = Expression { kind: "bool".to_owned(), value: ExpressionValue::Bool(false) };
+        assert_eq!(render_expr(&t), "true");
+        assert_eq!(render_expr(&f), "false");
+    }
+
+    #[test]
+    fn int_expr_renders_as_number() {
+        let expr = Expression { kind: "int".to_owned(), value: ExpressionValue::Int(42) };
+        assert_eq!(render_expr(&expr), "42");
+    }
+
+    #[test]
+    fn theorem_comment_uses_dot_notation_for_enum_values() {
+        let ws = generate_lean_workspace(&rich_set());
+        let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
+        // enum rhs values must use Lean 4 dot-notation
+        assert!(f.content.contains(".Paid") || f.content.contains(".Cancelled"),
+            "enum values must render with dot prefix, got:\n{}", f.content);
     }
 
     fn minimal_set() -> ContractSet {

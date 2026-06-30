@@ -11,7 +11,7 @@ use tauto::lean_gen::{
     LakeError, LeanWorkspace, check_lean_available, generate_lean_workspace, run_lake_build,
     scan_lean_workspace, write_lean_workspace,
 };
-use tauto::project_store::{save_document, ContractDocument};
+use tauto::project_store::{load_document, save_document, ContractDocument};
 use tauto::slm::{ArtifactKind, CodeGenerationRequest, DeepSeekProvider, SlmCodeGenerator};
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
@@ -92,14 +92,30 @@ enum Commands {
         #[arg(long, default_value = "text", value_enum)]
         format: OutputFormat,
     },
+    /// Retrieve and parse stored contracts for a project
+    Retrieve {
+        /// Project slug to retrieve contracts for
+        #[arg(long)]
+        project: String,
+        /// Root directory of the contract store
+        #[arg(long, default_value = "tauto-store")]
+        store_root: PathBuf,
+        /// Output format
+        #[arg(long, default_value = "text", value_enum)]
+        format: OutputFormat,
+    },
 }
 
 fn main() {
     let cli = Cli::parse();
 
-    if let Err(e) = check_lean_available() {
-        eprintln!("error: {e}");
-        std::process::exit(1);
+    // TAUTO_SKIP_LEAN_CHECK=1 bypasses the startup check — for local development / integration
+    // testing on machines where Lean is not installed. Not intended for production use.
+    if std::env::var("TAUTO_SKIP_LEAN_CHECK").is_err() {
+        if let Err(e) = check_lean_available() {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
     }
 
     let result = match cli.command {
@@ -112,6 +128,9 @@ fn main() {
         Commands::Store { path, project, store_root, format } => {
             run_store(&path, &project, &store_root, &format)
         }
+        Commands::Retrieve { project, store_root, format } => {
+            run_retrieve(&project, &store_root, &format)
+        }
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
@@ -120,8 +139,8 @@ fn main() {
 }
 
 fn run_verify(
-    path: &PathBuf,
-    output: &PathBuf,
+    path: &std::path::Path,
+    output: &std::path::Path,
     strict: bool,
     format: &OutputFormat,
     model: &Option<String>,
@@ -244,7 +263,7 @@ fn run_verify(
 }
 
 fn run_hash(
-    path: &PathBuf,
+    path: &std::path::Path,
     format: &OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (contract_set, parse_errors, file_count) = parse_contracts(path)?;
@@ -273,7 +292,7 @@ fn run_hash(
     Ok(())
 }
 
-fn run_list(path: &PathBuf, format: &OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
+fn run_list(path: &std::path::Path, format: &OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
     let (contract_set, parse_errors, file_count) = parse_contracts(path)?;
 
     if *format == OutputFormat::Json {
@@ -318,8 +337,8 @@ fn run_list(path: &PathBuf, format: &OutputFormat) -> Result<(), Box<dyn std::er
 }
 
 fn run_diff(
-    base_path: &PathBuf,
-    new_path: &PathBuf,
+    base_path: &std::path::Path,
+    new_path: &std::path::Path,
     strict: bool,
     format: &OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -434,7 +453,7 @@ struct SlmAttemptResult {
 
 fn attempt_slm_proofs(
     workspace: &LeanWorkspace,
-    workspace_path: &PathBuf,
+    workspace_path: &std::path::Path,
     model_name: &str,
 ) -> Result<SlmAttemptResult, Box<dyn std::error::Error>> {
     let provider: Box<dyn SlmCodeGenerator> = match model_name {
@@ -473,9 +492,9 @@ fn attempt_slm_proofs(
 }
 
 fn run_store(
-    path: &PathBuf,
+    path: &std::path::Path,
     project: &str,
-    store_root: &PathBuf,
+    store_root: &std::path::Path,
     format: &OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let files = collect_markdown_files(path)?;
@@ -538,12 +557,93 @@ fn run_store(
     Ok(())
 }
 
+fn run_retrieve(
+    project: &str,
+    store_root: &std::path::Path,
+    format: &OutputFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let project_dir = store_root.join(project);
+    if !project_dir.exists() {
+        return Err(format!("no store found for project '{project}' at {}", project_dir.display()).into());
+    }
+
+    // Walk the project directory, collect .md files (skip .json sidecars)
+    let mut md_files: Vec<PathBuf> = Vec::new();
+    collect_recursive(&project_dir, &mut md_files)?;
+    md_files.sort();
+
+    if md_files.is_empty() {
+        eprintln!("No stored documents found for project '{project}'.");
+        return Ok(());
+    }
+
+    #[derive(Debug)]
+    struct RetrievedDoc {
+        rel_path: String,
+        title: String,
+        version: u32,
+        contract_count: usize,
+    }
+
+    let mut docs: Vec<RetrievedDoc> = Vec::new();
+    let mut total_contracts: usize = 0;
+
+    for md_path in &md_files {
+        let rel = md_path
+            .strip_prefix(&project_dir)
+            .ok()
+            .and_then(|p| p.to_str())
+            .unwrap_or("?")
+            .to_owned();
+
+        let doc = load_document(store_root, project, &rel)?;
+        let contract_count = {
+            let blocks = extract_contract_blocks(&doc.markdown_content, &rel);
+            blocks.iter().filter_map(|b| parse_contract_block(b).contract).count()
+        };
+        total_contracts += contract_count;
+        docs.push(RetrievedDoc {
+            rel_path: rel,
+            title: doc.title,
+            version: doc.version,
+            contract_count,
+        });
+    }
+
+    if *format == OutputFormat::Json {
+        let items: Vec<_> = docs
+            .iter()
+            .map(|d| serde_json::json!({
+                "path": d.rel_path,
+                "title": d.title,
+                "version": d.version,
+                "contracts": d.contract_count,
+            }))
+            .collect();
+        let json = serde_json::json!({
+            "project": project,
+            "documents": docs.len(),
+            "contracts": total_contracts,
+            "items": items,
+        });
+        println!("{}", serde_json::to_string_pretty(&json)?);
+        return Ok(());
+    }
+
+    println!("Project '{project}': {} document(s), {total_contracts} contract(s)", docs.len());
+    for d in &docs {
+        println!("  {} (v{}) — {} contract(s) — {}", d.title, d.version, d.contract_count, d.rel_path);
+    }
+
+    Ok(())
+}
+
 fn render_cond(c: &Condition) -> String {
     format!("{} {} {}", c.left.value, c.operator, c.right.value)
 }
 
 fn parse_contracts(
-    path: &PathBuf,
+    path: &std::path::Path,
 ) -> Result<(ContractSet, usize, usize), Box<dyn std::error::Error>> {
     let files = collect_markdown_files(path)?;
     if files.is_empty() {
@@ -578,9 +678,9 @@ fn parse_contracts(
     Ok((ContractSet::new(contracts), parse_errors, files.len()))
 }
 
-fn collect_markdown_files(path: &PathBuf) -> std::io::Result<Vec<PathBuf>> {
+fn collect_markdown_files(path: &std::path::Path) -> std::io::Result<Vec<PathBuf>> {
     if path.is_file() {
-        return Ok(vec![path.clone()]);
+        return Ok(vec![path.to_path_buf()]);
     }
     let mut files = Vec::new();
     collect_recursive(path, &mut files)?;
@@ -588,7 +688,7 @@ fn collect_markdown_files(path: &PathBuf) -> std::io::Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-fn collect_recursive(dir: &PathBuf, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
+fn collect_recursive(dir: &std::path::Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let p = entry.path();

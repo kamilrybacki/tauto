@@ -2,7 +2,11 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 
 fn tauto() -> Command {
-    Command::cargo_bin("tauto").unwrap()
+    let mut cmd = Command::cargo_bin("tauto").unwrap();
+    // Bypass the startup Lean check for integration tests on machines without Lean installed.
+    // Tests that specifically exercise --lean-check must clear this variable themselves.
+    cmd.env("TAUTO_SKIP_LEAN_CHECK", "1");
+    cmd
 }
 
 fn fixture(relative: &str) -> String {
@@ -299,8 +303,9 @@ fn diff_format_json_includes_conflict_candidates_array() {
 fn verify_lean_check_fails_gracefully_when_lake_not_in_path() {
     let out = tempfile::tempdir().unwrap();
     tauto()
-        // Restrict PATH so lake binary is unreachable
+        // Restrict PATH so lake binary is unreachable; also clear the skip bypass
         .env("PATH", "/usr/bin:/bin")
+        .env_remove("TAUTO_SKIP_LEAN_CHECK")
         .args([
             "verify",
             &fixture("orders.md"),
@@ -468,4 +473,67 @@ fn store_recursive_preserves_relative_paths_to_avoid_collision() {
     // base/orders.md and mirror/orders.md must be stored at distinct paths
     assert!(proj.join("base").join("orders.md").exists(), "base/orders.md must be stored");
     assert!(proj.join("mirror").join("orders.md").exists(), "mirror/orders.md must be stored");
+}
+
+// ── retrieve ──────────────────────────────────────────────────────────────────
+
+fn store_and_retrieve(store: &tempfile::TempDir, project: &str, fixture_path: &str) {
+    tauto()
+        .args(["store", fixture_path, "--project", project, "--store-root", store.path().to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[test]
+fn retrieve_lists_stored_documents() {
+    let store = tempfile::tempdir().unwrap();
+    store_and_retrieve(&store, "orders-project", &fixture("orders.md"));
+    tauto()
+        .args(["retrieve", "--project", "orders-project", "--store-root", store.path().to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("orders-project"))
+        .stdout(predicate::str::contains("1 document(s)"));
+}
+
+#[test]
+fn retrieve_format_json_outputs_valid_json() {
+    let store = tempfile::tempdir().unwrap();
+    store_and_retrieve(&store, "json-proj", &fixture("orders.md"));
+    let output = tauto()
+        .args(["retrieve", "--project", "json-proj", "--store-root", store.path().to_str().unwrap(), "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_str(&String::from_utf8(output).unwrap()).unwrap();
+    assert_eq!(v["project"], "json-proj");
+    assert_eq!(v["documents"], 1);
+    assert!(v["contracts"].as_u64().unwrap() > 0);
+    assert!(v["items"].is_array());
+    assert!(v["items"][0]["path"].is_string());
+    assert!(v["items"][0]["contracts"].is_number());
+}
+
+#[test]
+fn retrieve_unknown_project_exits_with_error() {
+    let store = tempfile::tempdir().unwrap();
+    tauto()
+        .args(["retrieve", "--project", "no-such-project", "--store-root", store.path().to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no-such-project"));
+}
+
+#[test]
+fn retrieve_reports_contract_count_per_document() {
+    let store = tempfile::tempdir().unwrap();
+    store_and_retrieve(&store, "count-proj", &fixture("orders.md"));
+    tauto()
+        .args(["retrieve", "--project", "count-proj", "--store-root", store.path().to_str().unwrap()])
+        .assert()
+        .success()
+        // orders.md has 2 contracts
+        .stdout(predicate::str::contains("2 contract(s)"));
 }

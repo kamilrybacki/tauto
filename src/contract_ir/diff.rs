@@ -82,7 +82,7 @@ pub fn compare(base: &ContractSet, new: &ContractSet) -> ContractSetDiff {
             added.push((*new_c).clone());
         }
     }
-    added.sort_by(|a, b| key_str(a).cmp(&key_str(b)));
+    added.sort_by_key(key_str);
 
     for (k, base_c) in &base_map {
         match new_map.get(k.as_str()) {
@@ -95,8 +95,8 @@ pub fn compare(base: &ContractSet, new: &ContractSet) -> ContractSetDiff {
             }
         }
     }
-    removed.sort_by(|a, b| key_str(a).cmp(&key_str(b)));
-    modified.sort_by(|a, b| a.key.to_display().cmp(&b.key.to_display()));
+    removed.sort_by_key(key_str);
+    modified.sort_by_key(|m| m.key.to_display());
 
     let is_expansion_only =
         removed.is_empty() && !modified.iter().any(|m| m.has_removals());
