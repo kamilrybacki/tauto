@@ -1,6 +1,6 @@
 # Tauto — Handoff Document
 
-_Updated after Phase R1 completion_
+_Updated after Phase R2 testable slice_
 
 ---
 
@@ -21,22 +21,40 @@ The Python prototype (Phases 0-2, 44 tests, 3 reviewed phases) is in git history
 ## Current State
 
 **Branch:** `tauto-phase-0-2`
-**Tests:** 94 passing
+**Tests:** 131 passing (116 unit, 15 integration)
 **Binary:** `cargo build` → `./target/debug/tauto`
 
 ### CLI Commands
 
 ```
-tauto verify <path> [--output <dir>] [--strict]
+tauto verify <path> [--output <dir>] [--strict] [--format text|json]
     Parse markdown contracts, generate Lean 4 workspace, scan for sorry stubs.
     --strict exits 1 if any sorry stubs found (for CI gate).
+    --format json emits a JSON summary (contracts, files, conflicts, sorry_count, workspace).
 
-tauto hash <path>
+tauto hash <path> [--format text|json]
     Print semantic hash (excludes source locations) and provenance hash.
     Semantic hash is stable across reformatting — use as cache key.
+    --format json emits { contracts, files, semantic, provenance }.
 
 tauto list <path>
     List parsed contracts (entity/operation/case + source location).
+
+tauto diff <base> <new> [--strict]
+    Structural diff between two contract sets; heuristic conflict detection on changed contracts.
+    --strict exits 1 if diff is not expansion-only.
+```
+
+### Integration tests
+
+```
+tests/
+  cli_integration.rs       # 15 tests — assert_cmd + predicates
+  fixtures/
+    orders.md              # 2 clean contracts
+    conflicts.md           # 2 contracts with conflicting ensures (conflict detection smoke test)
+    base/orders.md         # 1 contract (diff baseline)
+    expanded/orders.md     # 2 contracts (adds ShipApprovedOrder — expansion-only diff)
 ```
 
 ---
@@ -44,7 +62,10 @@ tauto list <path>
 ## Project Structure
 
 ```
-Cargo.toml              # single crate, lib + bin
+Cargo.toml              # single crate, lib + bin (assert_cmd/predicates in dev-deps)
+tests/
+  cli_integration.rs    # 15 integration tests (assert_cmd)
+  fixtures/             # canonical fixture markdown files
 src/
   lib.rs                # pub mod declarations
   main.rs               # CLI: verify / hash / list (clap)
@@ -104,12 +125,14 @@ src/
 
 ---
 
-## Test Count: 94
+## Test Count: 131
 
 | Module | Tests |
 |--------|-------|
 | `contract_ir::models` | 10 |
 | `contract_ir::serialization` | 6 |
+| `contract_ir::diff` | 10 |
+| `contract_ir::conflicts` | 10 |
 | `preprocessing::context_builder` | 7 |
 | `slm::provider` | 2 |
 | `slm::traceability` | 4 |
@@ -121,22 +144,32 @@ src/
 | `contract_parser::dsl` | 13 |
 | `project_store::models` | 4 |
 | `project_store::file_store` | 5 |
+| **integration (cli_integration)** | **15** |
 
 ---
 
-## Phase R2 — Next Steps
+## Phase R2 — Completed
 
-1. **Real SLM integration** — wire an actual LLM API (e.g. Deepseek, Ollama) behind `SlmCodeGenerator`. The trait is in place; add a concrete HTTP adapter in `slm/` with `reqwest` (add to deps).
+- **Integration tests** — 15 tests via `assert_cmd`+`predicates`, fixture markdown files in `tests/fixtures/`.
+- **`--format json`** — added to `verify` and `hash` subcommands. JSON schema documented above.
 
-2. **Lean proof attempt pipeline** — after generating sorry stubs, submit them to the SLM for proof attempts. Replace `sorry` with an actual proof term when the SLM succeeds. Re-scan to verify.
+## Phase R3 — Next Steps
 
-3. **CI artifact** — `cargo build --release` + GitHub Actions workflow producing a static binary.
+1. **Real SLM integration** — wire an actual LLM API behind `SlmCodeGenerator`.
+   `DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `NVIDIA_API_KEY` are available in the environment.
+   Add `reqwest` (with `json`, `blocking` features) + `tokio` (or use blocking) to `Cargo.toml`.
+   Implement `src/slm/http_provider.rs` (DeepSeek adapter is simplest: one POST to
+   `https://api.deepseek.com/v1/chat/completions`). Wire into `tauto verify --model <name>`.
 
-4. **Integration tests** — spawn the binary via `assert_cmd` crate and assert stdout/exit codes against fixture markdown files. Currently all tests are unit tests inside modules.
+2. **Lean proof attempt pipeline** — after generating sorry stubs, submit to SLM for proof terms.
+   Replace `sorry` with the SLM response, re-run `scan_lean_workspace` to verify the sorry count drops.
+   Blocked on Lean/Lake not installed — proof compilation cannot be validated until `lake build` runs.
 
-5. **`--format json` for `verify` and `hash`** — machine-readable output for tooling integration.
+3. **CI artifact** — `cargo build --release` + GitHub Actions workflow.
 
-6. **`project store` integration in CLI** — persist parsed contracts under a project slug for incremental re-verification.
+4. **`project store` CLI integration** — persist contracts under a project slug for incremental re-verification.
+
+5. **`--format json` for `list` and `diff`** — extend JSON output to remaining subcommands.
 
 ---
 

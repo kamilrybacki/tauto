@@ -9,6 +9,12 @@ use tauto::contract_ir::{
 use tauto::contract_parser::{extract_contract_blocks, parse_contract_block};
 use tauto::lean_gen::{generate_lean_workspace, scan_lean_workspace, write_lean_workspace};
 
+#[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
+enum OutputFormat {
+    Text,
+    Json,
+}
+
 #[derive(Parser)]
 #[command(name = "tauto", about = "Lean-backed business contract verifier")]
 struct Cli {
@@ -28,11 +34,17 @@ enum Commands {
         /// Exit with code 1 if any sorry stubs remain (for CI)
         #[arg(long)]
         strict: bool,
+        /// Output format
+        #[arg(long, default_value = "text", value_enum)]
+        format: OutputFormat,
     },
     /// Print semantic and provenance hashes for a contract set (CI cache keys)
     Hash {
         /// Directory or file containing contract markdown (recursive)
         path: PathBuf,
+        /// Output format
+        #[arg(long, default_value = "text", value_enum)]
+        format: OutputFormat,
     },
     /// List parsed contracts without generating output
     List {
@@ -54,8 +66,10 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
-        Commands::Verify { path, output, strict } => run_verify(&path, &output, strict),
-        Commands::Hash { path } => run_hash(&path),
+        Commands::Verify { path, output, strict, format } => {
+            run_verify(&path, &output, strict, &format)
+        }
+        Commands::Hash { path, format } => run_hash(&path, &format),
         Commands::List { path } => run_list(&path),
         Commands::Diff { base, new, strict } => run_diff(&base, &new, strict),
     };
@@ -69,6 +83,7 @@ fn run_verify(
     path: &PathBuf,
     output: &PathBuf,
     strict: bool,
+    format: &OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (contract_set, parse_errors, file_count) = parse_contracts(path)?;
 
@@ -77,9 +92,32 @@ fn run_verify(
         return Ok(());
     }
 
+    let conflicts = find_conflict_candidates(&contract_set);
+    let workspace = generate_lean_workspace(&contract_set);
+    let diagnostics = scan_lean_workspace(&workspace);
+    write_lean_workspace(&workspace, output)?;
+
+    if *format == OutputFormat::Json {
+        let json = serde_json::json!({
+            "contracts": contract_set.contracts.len(),
+            "files": file_count,
+            "conflicts": conflicts.iter().map(|c| serde_json::json!({
+                "key_a": c.key_a,
+                "key_b": c.key_b,
+                "reason": c.reason,
+            })).collect::<Vec<_>>(),
+            "sorry_count": diagnostics.len(),
+            "workspace": output.display().to_string(),
+        });
+        println!("{}", serde_json::to_string_pretty(&json)?);
+        if strict && !diagnostics.is_empty() {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+
     println!("Parsed {} contract(s) from {} file(s).", contract_set.contracts.len(), file_count);
 
-    let conflicts = find_conflict_candidates(&contract_set);
     if !conflicts.is_empty() {
         println!();
         println!("Conflict candidates ({}):", conflicts.len());
@@ -90,9 +128,6 @@ fn run_verify(
         println!("  Note: heuristic — Lean proof required for confirmation.");
     }
 
-    let workspace = generate_lean_workspace(&contract_set);
-    let diagnostics = scan_lean_workspace(&workspace);
-    write_lean_workspace(&workspace, output)?;
     println!();
     println!("Lean workspace written to {}.", output.display());
 
@@ -117,11 +152,25 @@ fn run_verify(
     Ok(())
 }
 
-fn run_hash(path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn run_hash(
+    path: &PathBuf,
+    format: &OutputFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
     let (contract_set, parse_errors, file_count) = parse_contracts(path)?;
 
     if contract_set.contracts.is_empty() {
         eprintln!("No contracts parsed ({parse_errors} errors).");
+        return Ok(());
+    }
+
+    if *format == OutputFormat::Json {
+        let json = serde_json::json!({
+            "contracts": contract_set.contracts.len(),
+            "files": file_count,
+            "semantic": semantic_contract_set_hash(&contract_set),
+            "provenance": contract_set_hash(&contract_set),
+        });
+        println!("{}", serde_json::to_string_pretty(&json)?);
         return Ok(());
     }
 
