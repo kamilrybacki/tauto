@@ -507,8 +507,35 @@ async fn handle_check(
     State(state): State<Arc<ServerState>>,
     body: String,
 ) -> ApiResult<CheckResponse> {
+    let contracts_path = state.contracts_path.clone();
+    // scan_path (disk I/O), conflict detection (CPU), and test-suite generation
+    // (CPU) all run on a blocking thread so the async runtime is not stalled,
+    // matching handle_history / handle_proofs.
+    tokio::task::spawn_blocking(move || compute_check(&contracts_path, &body))
+        .await
+        .map_err(api_err)?
+        .map(Json)
+}
+
+fn dedup_contracts(cs: &ContractSet) -> Vec<ContractIR> {
+    let mut seen: HashSet<String> = HashSet::new();
+    cs.contracts
+        .iter()
+        .filter(|c| seen.insert(contract_key(c)))
+        .cloned()
+        .collect()
+}
+
+fn conflict_tuple(c: &crate::contract_ir::ConflictCandidate) -> (String, String, String) {
+    (c.key_a.clone(), c.key_b.clone(), c.reason.clone())
+}
+
+fn compute_check(
+    contracts_path: &Path,
+    body: &str,
+) -> Result<CheckResponse, (StatusCode, Json<serde_json::Value>)> {
     // Parse proposed content fully in-memory — nothing is written to disk.
-    let blocks = extract_contract_blocks(&body, "<proposed>");
+    let blocks = extract_contract_blocks(body, "<proposed>");
     let mut proposed_contracts = Vec::new();
     let mut parse_errors = 0usize;
     for block in &blocks {
@@ -518,25 +545,51 @@ async fn handle_check(
             proposed_contracts.push(c);
         }
     }
+
+    // A body carrying no parseable contract is a malformed request, not a
+    // vacuously-compatible one. Reject it so callers can distinguish "clean
+    // and compatible" from "nothing was understood".
+    if proposed_contracts.is_empty() {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({
+                "error": "No parseable contract block found in request body",
+                "parse_errors": parse_errors,
+                "blocks_seen": blocks.len(),
+            })),
+        ));
+    }
     let proposed_cs = ContractSet::new(proposed_contracts);
 
-    // Load existing contracts from disk.
-    let (existing_cs, _, _) = scan_path(&state.contracts_path).map_err(api_err)?;
+    // Load existing contracts from disk (deduplicated by key, as elsewhere).
+    let (existing_raw, _, _) = scan_path(contracts_path).map_err(api_err)?;
+    let existing_cs = ContractSet::new(dedup_contracts(&existing_raw));
 
-    // Merge proposed into existing and run conflict detection.
-    let combined: Vec<ContractIR> = existing_cs.contracts.iter()
+    // Conflicts already present in the existing set are the baseline; we only
+    // report conflicts the proposal *introduces*, so a rule that reuses an
+    // existing key does not resurface pre-existing conflicts as if it caused them.
+    let baseline: HashSet<(String, String, String)> =
+        find_conflict_candidates(&existing_cs).iter().map(conflict_tuple).collect();
+
+    let combined: Vec<ContractIR> = existing_cs
+        .contracts
+        .iter()
         .chain(proposed_cs.contracts.iter())
         .cloned()
         .collect();
     let combined_cs = ContractSet::new(combined);
-    let all_conflicts = find_conflict_candidates(&combined_cs);
 
-    let proposed_keys: HashSet<String> = proposed_cs.contracts.iter()
-        .map(|c| format!("{}/{}/{}", c.entity, c.operation, c.case))
-        .collect();
-    let conflicts: Vec<ConflictInfo> = all_conflicts.iter()
+    let proposed_keys: HashSet<String> =
+        proposed_cs.contracts.iter().map(contract_key).collect();
+    let conflicts: Vec<ConflictInfo> = find_conflict_candidates(&combined_cs)
+        .iter()
+        .filter(|c| !baseline.contains(&conflict_tuple(c)))
         .filter(|c| proposed_keys.contains(&c.key_a) || proposed_keys.contains(&c.key_b))
-        .map(|c| ConflictInfo { key_a: c.key_a.clone(), key_b: c.key_b.clone(), reason: c.reason.clone() })
+        .map(|c| ConflictInfo {
+            key_a: c.key_a.clone(),
+            key_b: c.key_b.clone(),
+            reason: c.reason.clone(),
+        })
         .collect();
 
     // Generate JSON test suites — no SLM involved.
@@ -545,13 +598,13 @@ async fn handle_check(
     let total_cases = proposed_suites.iter().map(|s| s.cases.len()).sum::<usize>()
         + regression_suites.iter().map(|s| s.cases.len()).sum::<usize>();
 
-    Ok(Json(CheckResponse {
+    Ok(CheckResponse {
         compatible: conflicts.is_empty(),
         proposed_contracts: proposed_cs.contracts.len(),
         parse_errors,
         conflicts,
         tests: CheckTests { total_cases, proposed: proposed_suites, regression: regression_suites },
-    }))
+    })
 }
 
 // ── entry point ───────────────────────────────────────────────────────────────

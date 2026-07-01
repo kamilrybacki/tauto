@@ -138,14 +138,29 @@ fn expr_to_json(v: &ExpressionValue) -> serde_json::Value {
     }
 }
 
+// Boundary arithmetic uses saturating add/sub so a literal at i64::MIN/MAX cannot
+// panic (debug) or silently wrap (release) on user-controlled input. At saturation
+// the offset value collapses onto the boundary; the accompanying note flags the
+// comparison as unsatisfiable so a consumer is not misled.
 fn passing_value(cond: &Condition) -> (serde_json::Value, Option<String>) {
     match (&cond.operator as &str, &cond.right.value) {
         (">=", ExpressionValue::Int(n)) => ((*n).into(), Some(format!("boundary: exactly {n}"))),
         ("<=", ExpressionValue::Int(n)) => ((*n).into(), Some(format!("boundary: exactly {n}"))),
-        (">",  ExpressionValue::Int(n)) => ((*n + 1).into(), Some(format!("{} satisfies >{n}", *n + 1))),
-        ("<",  ExpressionValue::Int(n)) => ((*n - 1).into(), Some(format!("{} satisfies <{n}", *n - 1))),
+        (">",  ExpressionValue::Int(n)) => {
+            let v = n.saturating_add(1);
+            let note = if v > *n { format!("{v} satisfies >{n}") } else { format!(">{n} is unsatisfiable (i64 max)") };
+            (v.into(), Some(note))
+        }
+        ("<",  ExpressionValue::Int(n)) => {
+            let v = n.saturating_sub(1);
+            let note = if v < *n { format!("{v} satisfies <{n}") } else { format!("<{n} is unsatisfiable (i64 min)") };
+            (v.into(), Some(note))
+        }
         ("==", ExpressionValue::Int(n)) => ((*n).into(), None),
-        ("!=", ExpressionValue::Int(n)) => ((*n + 1).into(), Some(format!("{} ≠ {n}", *n + 1))),
+        ("!=", ExpressionValue::Int(n)) => {
+            let v = if *n == i64::MAX { n.saturating_sub(1) } else { n.saturating_add(1) };
+            (v.into(), Some(format!("{v} ≠ {n}")))
+        }
         ("==", ExpressionValue::Bool(b)) => ((*b).into(), None),
         ("!=", ExpressionValue::Bool(b)) => ((!b).into(), None),
         ("==", ExpressionValue::Str(s)) => (s.clone().into(), None),
@@ -162,11 +177,22 @@ fn passing_value(cond: &Condition) -> (serde_json::Value, Option<String>) {
 
 fn failing_value(cond: &Condition) -> (serde_json::Value, Option<String>) {
     match (&cond.operator as &str, &cond.right.value) {
-        (">=", ExpressionValue::Int(n)) => ((*n - 1).into(), Some(format!("{} < {n} — violates ≥{n}", *n - 1))),
-        ("<=", ExpressionValue::Int(n)) => ((*n + 1).into(), Some(format!("{} > {n} — violates ≤{n}", *n + 1))),
-        (">",  ExpressionValue::Int(n)) => ((*n).into(),     Some(format!("{n} == {n} — equal boundary fails >{n}"))),
-        ("<",  ExpressionValue::Int(n)) => ((*n).into(),     Some(format!("{n} == {n} — equal boundary fails <{n}"))),
-        ("==", ExpressionValue::Int(n)) => ((*n + 1).into(), Some(format!("{} ≠ required {n}", *n + 1))),
+        (">=", ExpressionValue::Int(n)) => {
+            let v = n.saturating_sub(1);
+            let note = if v < *n { format!("{v} < {n} — violates ≥{n}") } else { format!("≥{n} always holds (i64 min)") };
+            (v.into(), Some(note))
+        }
+        ("<=", ExpressionValue::Int(n)) => {
+            let v = n.saturating_add(1);
+            let note = if v > *n { format!("{v} > {n} — violates ≤{n}") } else { format!("≤{n} always holds (i64 max)") };
+            (v.into(), Some(note))
+        }
+        (">",  ExpressionValue::Int(n)) => ((*n).into(), Some(format!("{n} == {n} — equal boundary fails >{n}"))),
+        ("<",  ExpressionValue::Int(n)) => ((*n).into(), Some(format!("{n} == {n} — equal boundary fails <{n}"))),
+        ("==", ExpressionValue::Int(n)) => {
+            let v = if *n == i64::MAX { n.saturating_sub(1) } else { n.saturating_add(1) };
+            (v.into(), Some(format!("{v} ≠ required {n}")))
+        }
         ("!=", ExpressionValue::Int(n)) => ((*n).into(),     Some(format!("{n} violates ≠{n}"))),
         ("==", ExpressionValue::Bool(b)) => ((!b).into(),    Some(format!("opposite of required {b}"))),
         ("!=", ExpressionValue::Bool(b)) => ((*b).into(),    Some(format!("{b} violates ≠{b}"))),
@@ -285,5 +311,39 @@ mod tests {
         assert_eq!(to_snake("ApprovePrime"), "approve_prime");
         assert_eq!(to_snake("myField"), "my_field");
         assert_eq!(to_snake("simple"), "simple");
+    }
+
+    #[test]
+    fn boundary_values_saturate_at_i64_extremes_without_panic() {
+        // These previously panicked in debug (overflow) on user-controlled input.
+        for op in [">", "<", ">=", "<=", "==", "!="] {
+            for n in [i64::MAX, i64::MIN] {
+                let cond = int_cond("amount", op, n);
+                // Must not panic; both values are well-formed JSON numbers.
+                let p = assign_passing(&cond);
+                let f = assign_failing(&cond);
+                assert!(p.value.is_number());
+                assert!(f.value.is_number());
+            }
+        }
+    }
+
+    #[test]
+    fn gt_i64_max_marks_unsatisfiable() {
+        let cond = int_cond("amount", ">", i64::MAX);
+        let a = assign_passing(&cond);
+        assert_eq!(a.value, serde_json::json!(i64::MAX));
+        assert!(a.note.unwrap().contains("unsatisfiable"));
+    }
+
+    #[test]
+    fn full_suite_generation_handles_extreme_literals() {
+        let mut c = ContractIR::new("Edge", "E", "op");
+        c.requires = vec![int_cond("amount", ">", i64::MAX), int_cond("floor", "<", i64::MIN)];
+        let cs = ContractSet::new(vec![c]);
+        // Full path (happy + per-condition violations) must not panic.
+        let suites = generate_suite(&cs);
+        assert_eq!(suites.len(), 1);
+        assert_eq!(suites[0].cases.len(), 3); // 1 happy + 2 violations
     }
 }
