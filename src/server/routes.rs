@@ -13,7 +13,10 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use crate::contract_ir::{find_conflict_candidates, ContractIR, ContractSet};
 use crate::contract_parser::{extract_contract_blocks, parse_contract_block};
-use crate::glossary::{self, Glossary, GlossaryWarning, StateCoverage};
+use crate::glossary::{
+    self, FileStateSource, Glossary, GlossaryWarning, ObservedDomains, ReconcileReport,
+    StateCoverage, StateSource,
+};
 use crate::lean_gen::{generate_lean_workspace, run_lake_build, write_lean_workspace};
 use crate::scanner::{scan_glossary, scan_path};
 use crate::test_gen;
@@ -648,6 +651,43 @@ async fn handle_lifecycle(State(state): State<Arc<ServerState>>) -> ApiResult<Ve
     .map_err(api_err)
 }
 
+// ── /api/v1/reconcile ─────────────────────────────────────────────────────────
+
+/// Reconcile the glossary's declared state domains against observed ones.
+/// Source precedence: a live database (when configured) → a `_observed_states.json`
+/// descriptor in the contracts dir → none. Advisory: proposes completions, never
+/// mutates the glossary.
+async fn handle_reconcile(State(state): State<Arc<ServerState>>) -> ApiResult<ReconcileReport> {
+    let path = state.contracts_path.clone();
+    tokio::task::spawn_blocking(move || {
+        let glossary = scan_glossary(&path)?;
+
+        // Source precedence. The live-database StateSource slots in here as the
+        // first branch when DATABASE_URL is configured; until then we fall back
+        // to the file descriptor, then to no observation.
+        let file = FileStateSource::new(path.join("_observed_states.json"));
+        let (observed, source) = if file.exists() {
+            match file.observed_domains() {
+                Ok(o) => (o, "file"),
+                // A malformed descriptor should not 500 the endpoint; report it
+                // as "none" (the glossary stands, no observations applied).
+                Err(e) => {
+                    eprintln!("[reconcile] {e}");
+                    (ObservedDomains::new(), "none")
+                }
+            }
+        } else {
+            (ObservedDomains::new(), "none")
+        };
+
+        Ok::<_, std::io::Error>(glossary::reconcile(&glossary, &observed, source))
+    })
+    .await
+    .map_err(api_err)?
+    .map(Json)
+    .map_err(api_err)
+}
+
 // ── entry point ───────────────────────────────────────────────────────────────
 
 pub fn run_serve(
@@ -686,6 +726,7 @@ async fn serve_inner(
         .route("/api/v1/check", post(handle_check))
         .route("/api/v1/glossary", get(handle_glossary))
         .route("/api/v1/lifecycle", get(handle_lifecycle))
+        .route("/api/v1/reconcile", get(handle_reconcile))
         .with_state(state)
         .fallback_service(serve_dir);
 

@@ -237,6 +237,12 @@ fn tool_definitions() -> Value {
             "title": "State-machine coverage",
             "description": "For each entity state field, return the declared state domain, the transitions the current rules define over it (source state from a requires guard → target state from ensures), and coverage gaps: states with no incoming transition (candidate initial/unreachable), no outgoing (candidate terminal/dead-end), isolated (touched by no rule — a likely gap), and undeclared states used by a rule but missing from the glossary. Use it to see whether an entity's lifecycle is fully handled before adding a rule.",
             "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "reconcile_states",
+            "title": "Reconcile states against data",
+            "description": "Compare the glossary's declared state domains against states observed in real data (a live database when configured, else a _observed_states.json descriptor). Per state field it returns observed_not_declared (states in the data the glossary is missing — suggested completions) and declared_not_observed (declared but not seen — future/unused or a typo). Advisory: it proposes completions, it does not modify the glossary. `source` reports where the observations came from (database/file/none).",
+            "inputSchema": { "type": "object", "properties": {} }
         }
     ])
 }
@@ -257,6 +263,7 @@ fn handle_tool_call(ctx: &Ctx, id: Value, req: &Value) -> Value {
         "check_rule" => tool_check_rule(ctx, &args),
         "get_glossary" => tool_get_glossary(ctx, &args),
         "state_coverage" => tool_state_coverage(ctx, &args),
+        "reconcile_states" => tool_reconcile_states(ctx, &args),
         other => Err(format!("unknown tool: {other}")),
     };
 
@@ -531,6 +538,14 @@ fn tool_state_coverage(ctx: &Ctx, _args: &Value) -> Result<String, String> {
     Ok(pretty(&json!({
         "coverage": reports,
         "note": "Per entity state field: declared states, the transitions the rules define, and gaps (no_incoming = candidate initial/unreachable, no_outgoing = candidate terminal, isolated = untouched → likely a missing rule, undeclared_states = used but not in the glossary → completable from data).",
+    })))
+}
+
+fn tool_reconcile_states(ctx: &Ctx, _args: &Value) -> Result<String, String> {
+    let report = ctx.get_json("/api/v1/reconcile")?;
+    Ok(pretty(&json!({
+        "reconciliation": report,
+        "note": "observed_not_declared = states in real data missing from the glossary (propose adding them). declared_not_observed = declared but unseen (future/unused or typo). `source` = database/file/none. Advisory — the glossary is not modified.",
     })))
 }
 
