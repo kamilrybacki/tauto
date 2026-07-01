@@ -87,12 +87,25 @@ pub fn parse_glossary_block(block: &str) -> Option<EntityDef> {
             }
             "fields" => {
                 if !inline.is_empty() {
-                    if let Some(f) = parse_field(inline) {
+                    if let Some(f) = parse_field(inline, false) {
                         entity.fields.push(f);
                     }
                 }
                 consume_indented(&mut lines, |item| {
-                    if let Some(f) = parse_field(item) {
+                    if let Some(f) = parse_field(item, false) {
+                        entity.fields.push(f);
+                    }
+                });
+            }
+            "states" => {
+                // Determinant fields. Parsed like `fields` but flagged `state`.
+                if !inline.is_empty() {
+                    if let Some(f) = parse_field(inline, true) {
+                        entity.fields.push(f);
+                    }
+                }
+                consume_indented(&mut lines, |item| {
+                    if let Some(f) = parse_field(item, true) {
                         entity.fields.push(f);
                     }
                 });
@@ -134,7 +147,7 @@ fn split_list(s: &str) -> Vec<String> {
 
 /// Parse a `name: type` field item. `type` is optional; `enum(A, B, C)` yields
 /// the enum members.
-fn parse_field(item: &str) -> Option<FieldDef> {
+fn parse_field(item: &str, state: bool) -> Option<FieldDef> {
     let (name, ty) = match item.split_once(':') {
         Some((n, t)) => (n.trim(), t.trim()),
         None => (item.trim(), ""),
@@ -152,6 +165,7 @@ fn parse_field(item: &str) -> Option<FieldDef> {
         name: name.to_owned(),
         type_name,
         enum_values,
+        state,
     })
 }
 
@@ -237,5 +251,32 @@ operations:
     fn aka_accepts_comma_list() {
         let e = parse_glossary_block("entity Order\naka: order, ord").unwrap();
         assert_eq!(e.aka, vec!["order", "ord"]);
+    }
+
+    #[test]
+    fn states_section_flags_determinant_fields() {
+        let block = "\
+entity Order
+aka: order
+states:
+  status: enum(Unpaid, Paid, Shipped)
+fields:
+  amount: int";
+        let e = parse_glossary_block(block).unwrap();
+        // Both state and plain fields land in `fields`.
+        assert_eq!(e.fields.len(), 2);
+        let status = e.field("status").unwrap();
+        assert!(status.state, "status must be flagged as a state field");
+        assert_eq!(status.enum_values, vec!["Unpaid", "Paid", "Shipped"]);
+        assert!(!e.field("amount").unwrap().state);
+        assert_eq!(e.state_fields().count(), 1);
+        assert!(e.has_state());
+    }
+
+    #[test]
+    fn entity_without_states_has_no_state_fields() {
+        let e = parse_glossary_block("entity Order\nfields:\n  amount: int").unwrap();
+        assert!(!e.has_state());
+        assert_eq!(e.state_fields().count(), 0);
     }
 }

@@ -59,12 +59,41 @@ fn validate_contract(c: &ContractIR, glossary: &Glossary, out: &mut Vec<Glossary
                     ),
                 });
             }
+            // A rule on a stateful entity should explicitly guard on a state
+            // field, so its source state is stated rather than implicit — this
+            // is what makes precondition-aware conflict detection reliable.
+            if e.has_state() && !guards_on_state(c, e) {
+                let names: Vec<&str> = e.state_fields().map(|f| f.name.as_str()).collect();
+                out.push(GlossaryWarning {
+                    contract: k.clone(),
+                    category: "missing_state_guard".to_owned(),
+                    message: format!(
+                        "rule on stateful entity '{}' does not guard on a state field ({}); its source state is implicit",
+                        c.entity,
+                        names.join(", ")
+                    ),
+                });
+            }
         }
     }
 
     for cond in c.requires.iter().chain(c.ensures.iter()) {
         validate_condition(c, cond, glossary, entity_def.is_some(), &k, out);
     }
+}
+
+/// Whether the contract's `requires` includes a guard on one of the entity's
+/// state fields — i.e. a condition `<alias>.<stateField>` in the preconditions.
+fn guards_on_state(c: &ContractIR, entity: &crate::glossary::models::EntityDef) -> bool {
+    c.requires.iter().any(|cond| {
+        let ExpressionValue::Str(path) = &cond.left.value else {
+            return false;
+        };
+        let Some((prefix, field)) = path.split_once('.') else {
+            return false;
+        };
+        entity.has_alias(prefix) && entity.field(field).is_some_and(|f| f.state)
+    })
 }
 
 fn validate_condition(
@@ -180,14 +209,23 @@ mod tests {
         }
     }
 
+    fn state_field(name: &str, values: &[&str]) -> FieldDef {
+        FieldDef {
+            name: name.to_owned(),
+            type_name: "enum".to_owned(),
+            enum_values: values.iter().map(|s| s.to_string()).collect(),
+            state: true,
+        }
+    }
+
     fn mortgage() -> EntityDef {
         EntityDef {
             name: "Mortgage".to_owned(),
             aka: vec!["loan".to_owned()],
             describes: None,
             fields: vec![
-                FieldDef { name: "credit_score".to_owned(), type_name: "int".to_owned(), enum_values: vec![] },
-                FieldDef { name: "status".to_owned(), type_name: "enum".to_owned(), enum_values: vec!["UnderReview".to_owned(), "Approved".to_owned()] },
+                FieldDef::new("credit_score", "int"),
+                state_field("status", &["UnderReview", "Approved"]),
             ],
             operations: vec!["approveApplication".to_owned()],
         }
@@ -196,7 +234,7 @@ mod tests {
     fn package() -> EntityDef {
         let mut e = EntityDef::new("Package");
         e.aka = vec!["package".to_owned()];
-        e.fields = vec![FieldDef { name: "weight".to_owned(), type_name: "int".to_owned(), enum_values: vec![] }];
+        e.fields = vec![FieldDef::new("weight", "int")];
         e
     }
 
@@ -220,11 +258,46 @@ mod tests {
     #[test]
     fn clean_contract_no_warnings() {
         let c = contract_with(
-            vec![cond("loan.credit_score", ">=", ExpressionValue::Int(750))],
+            vec![
+                cond("loan.status", "==", ExpressionValue::Str("UnderReview".to_owned())),
+                cond("loan.credit_score", ">=", ExpressionValue::Int(750)),
+            ],
             vec![cond("result.status", "==", ExpressionValue::Str("Approved".to_owned()))],
         );
         let w = run(c, Glossary::new(vec![mortgage()]));
         assert!(w.is_empty(), "unexpected: {w:?}");
+    }
+
+    #[test]
+    fn missing_state_guard_flagged() {
+        // A Mortgage rule that guards only on credit_score, never on the state
+        // field `status` → its source state is implicit.
+        let c = contract_with(
+            vec![cond("loan.credit_score", ">=", ExpressionValue::Int(750))],
+            vec![cond("result.status", "==", ExpressionValue::Str("Approved".to_owned()))],
+        );
+        let w = run(c, Glossary::new(vec![mortgage()]));
+        let m = w.iter().find(|x| x.category == "missing_state_guard").expect("expected missing_state_guard");
+        assert!(m.message.contains("status"));
+    }
+
+    #[test]
+    fn state_guarded_rule_has_no_missing_state_guard() {
+        let c = contract_with(
+            vec![cond("loan.status", "==", ExpressionValue::Str("UnderReview".to_owned()))],
+            vec![],
+        );
+        let w = run(c, Glossary::new(vec![mortgage()]));
+        assert!(!w.iter().any(|x| x.category == "missing_state_guard"), "unexpected: {w:?}");
+    }
+
+    #[test]
+    fn stateless_entity_never_flags_missing_state_guard() {
+        // Package declares no state fields → the check does not apply.
+        let mut c = ContractIR::new("Weigh", "Package", "weigh");
+        c.requires = vec![cond("package.weight", ">", ExpressionValue::Int(0))];
+        let w = run(c, Glossary::new(vec![mortgage(), package()]));
+        assert!(!w.iter().any(|x| x.category == "missing_state_guard"));
     }
 
     #[test]

@@ -10,6 +10,23 @@ pub struct FieldDef {
     pub type_name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enum_values: Vec<String>,
+    /// A determinant / lifecycle field: it holds one of a bounded range of
+    /// states and selects which guarded transition applies. Declared in the
+    /// `states:` section of a glossary block.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub state: bool,
+}
+
+impl FieldDef {
+    /// A plain (non-state) field with an optional type.
+    pub fn new(name: impl Into<String>, type_name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            type_name: type_name.into(),
+            enum_values: Vec::new(),
+            state: false,
+        }
+    }
 }
 
 /// A domain entity: its canonical name, the instance-prefix aliases used in
@@ -47,6 +64,16 @@ impl EntityDef {
     /// Whether `prefix` is one of this entity's instance aliases.
     pub fn has_alias(&self, prefix: &str) -> bool {
         self.aka.iter().any(|a| a == prefix)
+    }
+
+    /// The determinant / lifecycle fields (declared under `states:`).
+    pub fn state_fields(&self) -> impl Iterator<Item = &FieldDef> {
+        self.fields.iter().filter(|f| f.state)
+    }
+
+    /// Whether any state field is declared for this entity.
+    pub fn has_state(&self) -> bool {
+        self.fields.iter().any(|f| f.state)
     }
 }
 
