@@ -14,7 +14,7 @@ set -euo pipefail
 
 BINARY="${TAUTO_BIN:-./target/release/tauto}"
 PORT="${TAUTO_PORT:-14001}"
-BASE="http://localhost:${PORT}"
+BASE="http://127.0.0.1:${PORT}"
 FIXTURES="$(cd "$(dirname "$0")/fixtures" && pwd)"
 RESP_FILE="/tmp/tauto-e2e-resp-$$.json"
 
@@ -35,10 +35,15 @@ trap cleanup EXIT INT TERM
 SERVER_PID=$!
 
 echo "Waiting for server (PID=$SERVER_PID)..."
-for i in $(seq 1 40); do
+for i in $(seq 1 120); do
     curl -s "$BASE/api/v1/contracts" >/dev/null 2>&1 && break
     sleep 0.25
-    [ "$i" -lt 40 ] || { echo "ERROR: server did not start within 10s" >&2; exit 1; }
+    [ "$i" -lt 120 ] || {
+        echo "ERROR: server did not start within 30s" >&2
+        echo "--- server log ---" >&2
+        cat "/tmp/tauto-e2e-server-$$.log" >&2 || true
+        exit 1
+    }
 done
 echo "Server ready at $BASE"
 echo "Contracts dir : $CONTRACTS_DIR"
