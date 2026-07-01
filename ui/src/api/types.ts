@@ -84,6 +84,47 @@ export interface HistoryResponse {
   entries: HistoryEntry[];
 }
 
+// ── check / test-gen ─────────────────────────────────────────────────────────
+
+export interface FieldAssignment {
+  field: string;
+  value: string | number | boolean;
+  note?: string;
+}
+
+export interface TestCase {
+  id: string;
+  kind: 'happy_path' | 'precondition_violation';
+  description: string;
+  operation: string;
+  given: FieldAssignment[];
+  expect_ensures?: FieldAssignment[];
+  expect_forbidden_not_called?: string[];
+  expect_preserved?: string[];
+  should_pass: boolean;
+  violated_precondition?: string;
+}
+
+export interface ContractTestSuite {
+  contract: string;
+  entity: string;
+  operation: string;
+  case_name: string;
+  cases: TestCase[];
+}
+
+export interface CheckResponse {
+  compatible: boolean;
+  proposed_contracts: number;
+  parse_errors: number;
+  conflicts: ConflictInfo[];
+  tests: {
+    total_cases: number;
+    proposed: ContractTestSuite[];
+    regression: ContractTestSuite[];
+  };
+}
+
 // ── proofs ────────────────────────────────────────────────────────────────────
 
 export interface LeanFile {

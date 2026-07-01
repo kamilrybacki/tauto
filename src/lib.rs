@@ -6,3 +6,4 @@ pub mod project_store;
 pub mod scanner;
 pub mod server;
 pub mod slm;
+pub mod test_gen;

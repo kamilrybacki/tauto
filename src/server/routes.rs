@@ -12,8 +12,10 @@ use tokio::sync::Mutex as AsyncMutex;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::contract_ir::{find_conflict_candidates, ContractIR, ContractSet};
+use crate::contract_parser::{extract_contract_blocks, parse_contract_block};
 use crate::lean_gen::{generate_lean_workspace, run_lake_build, write_lean_workspace};
 use crate::scanner::scan_path;
+use crate::test_gen;
 
 struct ServerState {
     contracts_path: PathBuf,
@@ -483,6 +485,75 @@ async fn handle_upload(
     Err(api_err("No field named 'file' found in the multipart body"))
 }
 
+// ── /api/v1/check ─────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct CheckTests {
+    total_cases: usize,
+    proposed: Vec<test_gen::ContractTestSuite>,
+    regression: Vec<test_gen::ContractTestSuite>,
+}
+
+#[derive(Serialize)]
+struct CheckResponse {
+    compatible: bool,
+    proposed_contracts: usize,
+    parse_errors: usize,
+    conflicts: Vec<ConflictInfo>,
+    tests: CheckTests,
+}
+
+async fn handle_check(
+    State(state): State<Arc<ServerState>>,
+    body: String,
+) -> ApiResult<CheckResponse> {
+    // Parse proposed content fully in-memory — nothing is written to disk.
+    let blocks = extract_contract_blocks(&body, "<proposed>");
+    let mut proposed_contracts = Vec::new();
+    let mut parse_errors = 0usize;
+    for block in &blocks {
+        let result = parse_contract_block(block);
+        parse_errors += result.diagnostics.len();
+        if let Some(c) = result.contract {
+            proposed_contracts.push(c);
+        }
+    }
+    let proposed_cs = ContractSet::new(proposed_contracts);
+
+    // Load existing contracts from disk.
+    let (existing_cs, _, _) = scan_path(&state.contracts_path).map_err(api_err)?;
+
+    // Merge proposed into existing and run conflict detection.
+    let combined: Vec<ContractIR> = existing_cs.contracts.iter()
+        .chain(proposed_cs.contracts.iter())
+        .cloned()
+        .collect();
+    let combined_cs = ContractSet::new(combined);
+    let all_conflicts = find_conflict_candidates(&combined_cs);
+
+    let proposed_keys: HashSet<String> = proposed_cs.contracts.iter()
+        .map(|c| format!("{}/{}/{}", c.entity, c.operation, c.case))
+        .collect();
+    let conflicts: Vec<ConflictInfo> = all_conflicts.iter()
+        .filter(|c| proposed_keys.contains(&c.key_a) || proposed_keys.contains(&c.key_b))
+        .map(|c| ConflictInfo { key_a: c.key_a.clone(), key_b: c.key_b.clone(), reason: c.reason.clone() })
+        .collect();
+
+    // Generate JSON test suites — no SLM involved.
+    let proposed_suites = test_gen::generate_suite(&proposed_cs);
+    let regression_suites = test_gen::generate_suite(&existing_cs);
+    let total_cases = proposed_suites.iter().map(|s| s.cases.len()).sum::<usize>()
+        + regression_suites.iter().map(|s| s.cases.len()).sum::<usize>();
+
+    Ok(Json(CheckResponse {
+        compatible: conflicts.is_empty(),
+        proposed_contracts: proposed_cs.contracts.len(),
+        parse_errors,
+        conflicts,
+        tests: CheckTests { total_cases, proposed: proposed_suites, regression: regression_suites },
+    }))
+}
+
 // ── entry point ───────────────────────────────────────────────────────────────
 
 pub fn run_serve(
@@ -518,6 +589,7 @@ async fn serve_inner(
         .route("/api/v1/graph", get(handle_graph))
         .route("/api/v1/history", get(handle_history))
         .route("/api/v1/proofs", get(handle_proofs))
+        .route("/api/v1/check", post(handle_check))
         .with_state(state)
         .fallback_service(serve_dir);
 

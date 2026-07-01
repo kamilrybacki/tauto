@@ -1,4 +1,4 @@
-import type { ContractsResponse, GraphResponse, HistoryResponse, ProofsResponse } from './types';
+import type { CheckResponse, ContractsResponse, GraphResponse, HistoryResponse, ProofsResponse } from './types';
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -20,3 +20,16 @@ export const fetchHistory = (): Promise<HistoryResponse> =>
 
 export const fetchProofs = (): Promise<ProofsResponse> =>
   get<ProofsResponse>('/api/v1/proofs');
+
+export async function checkRule(content: string): Promise<CheckResponse> {
+  const res = await fetch('/api/v1/check', {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: content,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`${res.status} ${res.statusText}${body ? ': ' + body : ''}`);
+  }
+  return res.json() as Promise<CheckResponse>;
+}

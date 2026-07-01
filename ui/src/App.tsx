@@ -6,8 +6,9 @@ import ContractList from './components/ContractList';
 import ContractDetail from './components/ContractDetail';
 import HistoryPanel from './components/HistoryPanel';
 import ProofsPanel from './components/ProofsPanel';
+import CheckPanel from './components/CheckPanel';
 
-type View = 'graph' | 'list' | 'history' | 'proofs';
+type View = 'graph' | 'list' | 'history' | 'proofs' | 'check';
 
 export default function App() {
   const [contracts, setContracts] = useState<ContractsResponse | null>(null);
@@ -74,6 +75,9 @@ export default function App() {
           <button className={view === 'proofs' ? 'active' : ''} onClick={() => setView('proofs')}>
             Proofs
           </button>
+          <button className={view === 'check' ? 'active' : ''} onClick={() => setView('check')}>
+            Check
+          </button>
         </nav>
       </header>
 
@@ -99,6 +103,7 @@ export default function App() {
         )}
         {view === 'history' && <HistoryPanel entries={history} />}
         {view === 'proofs' && <ProofsPanel />}
+        {view === 'check' && <CheckPanel />}
       </main>
     </div>
   );
