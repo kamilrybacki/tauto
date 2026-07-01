@@ -25,6 +25,9 @@ rules.
    declared fields and enum values, and operations. Use it to pick the *right*
    entity and its exact field/enum/operation names, and to keep distinct
    entities distinct (don't reach into `Package`'s fields from an `Order` rule).
+   For a stateful entity, also call `state_coverage` to see its lifecycle —
+   existing transitions and which states are unhandled (isolated / no-incoming /
+   no-outgoing) — so you know what a new rule should cover.
 
 2. **Converse.** Elicit the rule until you can name, unambiguously:
    - the **entity** it governs (a domain object, e.g. `Mortgage`, `Order`),

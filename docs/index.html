@@ -357,6 +357,30 @@ assumes:
   vocabulary <em>as it is written</em> — not audited after the fact.
 </div>
 
+<h3><span class="secnum">5.1</span> Lifecycle coverage</h3>
+
+<p>
+  Because a state field carries its complete set of possible values, the rules
+  can be read as a <em>state machine</em>: each rule is a transition from the
+  state it guards on (in <code>requires</code>) to the state it produces (in
+  <code>ensures result.&hellip;</code>). <em>tauto</em> assembles this graph per
+  entity state field and reports coverage gaps — declared states with
+  <em>no incoming</em> transition (a candidate initial or unreachable state),
+  <em>no outgoing</em> transition (a candidate terminal or dead-end),
+  <em>isolated</em> states touched by no rule at all (a likely gap), and any
+  <em>undeclared</em> state a rule uses but the glossary omits.
+</p>
+
+<div class="theorem-env example">
+  <span class="env-title">Example 5.3.</span>
+  A <code>Mortgage.status</code> lifecycle with rules for
+  <code>UnderReview&rarr;Approved&rarr;Funded&rarr;Closed</code> but none for
+  <code>Rejected</code> or <code>Refinanced</code> reports those two as
+  <em>isolated</em> — declared states that no rule reaches or leaves. The gap is
+  visible before a bug is written, not after. Exposed as
+  <code>GET /api/v1/lifecycle</code> and the <code>state_coverage</code> MCP tool.
+</div>
+
 <h2 id="lean"><span class="secnum">6</span> The Lean Backend</h2>
 
 <p>
@@ -422,6 +446,7 @@ tauto serve ./rules --port 4000
     <tr><td><code>GET /api/v1/proofs</code></td><td>Generate the Lean workspace and run <code>lake build</code> on demand.</td></tr>
     <tr><td><code>POST /api/v1/check</code></td><td>Dry-run validation of a proposed rule; returns verdict, tests, and glossary warnings. Writes nothing.</td></tr>
     <tr><td><code>GET /api/v1/glossary</code></td><td>The domain glossary: entities with their aliases, fields, enums, and operations.</td></tr>
+    <tr><td><code>GET /api/v1/lifecycle</code></td><td>State-machine coverage per entity state field: transitions and gaps (no-incoming / no-outgoing / isolated / undeclared).</td></tr>
   </tbody>
 </table>
 

@@ -68,6 +68,12 @@ operation guarding **disjoint** states (`status == Paid` → Shipped vs
 `status == Unpaid` → Rejected) are distinct lifecycle transitions, not a
 conflict — tauto suppresses that false positive.
 
+Because each state field carries its full domain, the rules read as a **state
+machine**. `GET /api/v1/lifecycle` (and the MCP `state_coverage` tool) reports
+each entity's transitions and coverage gaps — states with no incoming/outgoing
+transition, or **isolated** states no rule touches at all (a declared state you
+haven't written a rule for yet).
+
 ## Commands
 
 | Command | Purpose |
