@@ -13,11 +13,14 @@ pub struct ConflictCandidate {
 }
 
 /// Find pairs of contracts on the same `(entity, operation)` whose `ensures`
-/// conditions are syntactically contradictory.
+/// conditions are syntactically contradictory *and* whose preconditions can
+/// hold simultaneously.
 ///
 /// These are *candidates* — Lean proof verification is required to confirm a
-/// real logical conflict. Requires conditions are not analyzed here because
-/// mutually exclusive preconditions make two such contracts non-conflicting.
+/// real logical conflict. A pair with contradictory `ensures` is **not** a
+/// conflict when its `requires` sets are mutually exclusive: the two rules are
+/// then guarded transitions from disjoint states (e.g. `ship` of a `Paid` vs an
+/// `Unpaid` order), so they can never both fire on the same input.
 pub fn find_conflict_candidates(contract_set: &ContractSet) -> Vec<ConflictCandidate> {
     let mut by_op: HashMap<String, Vec<&ContractIR>> = HashMap::new();
     for c in &contract_set.contracts {
@@ -30,12 +33,16 @@ pub fn find_conflict_candidates(contract_set: &ContractSet) -> Vec<ConflictCandi
             for j in (i + 1)..group.len() {
                 let a = group[i];
                 let b = group[j];
+                // Only a conflict if the outcomes contradict AND the guards can
+                // co-occur. Disjoint preconditions ⇒ different lifecycle edges.
                 if let Some(reason) = ensures_contradiction(a, b) {
-                    candidates.push(ConflictCandidate {
-                        key_a: contract_key(a),
-                        key_b: contract_key(b),
-                        reason,
-                    });
+                    if preconditions_mutually_exclusive(a, b).is_none() {
+                        candidates.push(ConflictCandidate {
+                            key_a: contract_key(a),
+                            key_b: contract_key(b),
+                            reason,
+                        });
+                    }
                 }
             }
         }
@@ -43,6 +50,24 @@ pub fn find_conflict_candidates(contract_set: &ContractSet) -> Vec<ConflictCandi
     // Stable order: sort by key_a then key_b
     candidates.sort_by(|x, y| x.key_a.cmp(&y.key_a).then(x.key_b.cmp(&y.key_b)));
     candidates
+}
+
+/// Returns `Some(field)` when the two contracts' `requires` sets cannot hold at
+/// the same time — i.e. there is a shared left-hand side whose constraints in
+/// `a` and `b` are syntactically contradictory (the same complement analysis
+/// used for `ensures`). Such a pair governs disjoint input states.
+fn preconditions_mutually_exclusive(a: &ContractIR, b: &ContractIR) -> Option<String> {
+    for ca in &a.requires {
+        for cb in &b.requires {
+            if expr_display(&ca.left) != expr_display(&cb.left) {
+                continue;
+            }
+            if condition_contradiction(ca, cb).is_some() {
+                return Some(expr_display(&ca.left));
+            }
+        }
+    }
+    None
 }
 
 fn op_key(c: &ContractIR) -> String {
@@ -134,6 +159,119 @@ mod tests {
             assumes: vec![],
             source: None,
         }
+    }
+
+    fn contract_full(
+        case: &str,
+        entity: &str,
+        op: &str,
+        requires: Vec<Condition>,
+        ensures: Vec<Condition>,
+    ) -> ContractIR {
+        let mut c = contract(case, entity, op, ensures);
+        c.requires = requires;
+        c
+    }
+
+    #[test]
+    fn no_conflict_when_preconditions_mutually_exclusive() {
+        // The Paid/Unpaid case: two transitions from disjoint source states.
+        // `ship Paid → Shipped` and `ship Unpaid → Rejected` are different edges
+        // of the Order lifecycle, not a contradiction.
+        let cs = ContractSet::new(vec![
+            contract_full(
+                "ShipPaidOrder",
+                "Order",
+                "ship",
+                vec![cond("order.status", "==", "Paid")],
+                vec![cond("result.status", "==", "Shipped")],
+            ),
+            contract_full(
+                "CannotShipUnpaidOrder",
+                "Order",
+                "ship",
+                vec![cond("order.status", "==", "Unpaid")],
+                vec![cond("result.status", "==", "Rejected")],
+            ),
+        ]);
+        assert!(
+            find_conflict_candidates(&cs).is_empty(),
+            "disjoint preconditions must suppress the ensures contradiction"
+        );
+    }
+
+    #[test]
+    fn conflict_when_preconditions_overlap() {
+        // Same source state, contradictory targets → genuine nondeterminism.
+        let cs = ContractSet::new(vec![
+            contract_full(
+                "Approve",
+                "Mortgage",
+                "review",
+                vec![cond("loan.status", "==", "UnderReview")],
+                vec![cond("result.status", "==", "Approved")],
+            ),
+            contract_full(
+                "Reject",
+                "Mortgage",
+                "review",
+                vec![cond("loan.status", "==", "UnderReview")],
+                vec![cond("result.status", "==", "Rejected")],
+            ),
+        ]);
+        assert_eq!(
+            find_conflict_candidates(&cs).len(),
+            1,
+            "overlapping preconditions with contradictory ensures is a real conflict"
+        );
+    }
+
+    #[test]
+    fn no_conflict_when_preconditions_mutually_exclusive_on_int_bound() {
+        // Guard on a numeric determinant: credit_score >= 750 vs < 750.
+        let cs = ContractSet::new(vec![
+            contract_full(
+                "Prime",
+                "Mortgage",
+                "price",
+                vec![cond("loan.credit_score", ">=", "750")],
+                vec![cond("result.tier", "==", "Prime")],
+            ),
+            contract_full(
+                "Subprime",
+                "Mortgage",
+                "price",
+                vec![cond("loan.credit_score", "<", "750")],
+                vec![cond("result.tier", "==", "Subprime")],
+            ),
+        ]);
+        assert!(
+            find_conflict_candidates(&cs).is_empty(),
+            "disjoint numeric guards must suppress the conflict"
+        );
+    }
+
+    #[test]
+    fn conflict_stands_when_only_one_rule_has_preconditions() {
+        // One guarded, one unguarded → the unguarded rule can fire in the same
+        // state as the guarded one, so the contradiction remains possible.
+        let cs = ContractSet::new(vec![
+            contract_full(
+                "Guarded",
+                "Order",
+                "ship",
+                vec![cond("order.status", "==", "Paid")],
+                vec![cond("result.status", "==", "Shipped")],
+            ),
+            contract_full(
+                "Unguarded",
+                "Order",
+                "ship",
+                vec![],
+                vec![cond("result.status", "==", "Rejected")],
+            ),
+        ]);
+        assert_eq!(find_conflict_candidates(&cs).len(), 1);
     }
 
     #[test]
