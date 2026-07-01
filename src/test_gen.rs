@@ -113,8 +113,11 @@ fn assign_ensures(cond: &Condition) -> FieldAssignment {
 fn left_field(cond: &Condition) -> String {
     match &cond.left.value {
         ExpressionValue::Str(s) => s.clone(),
-        ExpressionValue::Int(n) => n.to_string(),
-        ExpressionValue::Bool(b) => b.to_string(),
+        // A well-formed condition has a field path on the left. A literal here is
+        // a malformed rule (e.g. `42 == 1`); flag it rather than emit a bogus
+        // field name that looks real.
+        ExpressionValue::Int(n) => format!("<non-field:{n}>"),
+        ExpressionValue::Bool(b) => format!("<non-field:{b}>"),
     }
 }
 

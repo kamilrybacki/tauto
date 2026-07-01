@@ -26,9 +26,14 @@ struct ServerState {
 type ApiResult<T> = Result<Json<T>, (StatusCode, Json<serde_json::Value>)>;
 
 fn api_err(e: impl std::fmt::Display) -> (StatusCode, Json<serde_json::Value>) {
+    // Log the real error (which may contain filesystem paths or other internal
+    // detail) server-side, but return a generic message to the client so nothing
+    // sensitive leaks. Domain errors (409 conflict, 422 unprocessable) build their
+    // own curated bodies and do not go through this path.
+    eprintln!("[api error] {e}");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(serde_json::json!({ "error": e.to_string() })),
+        Json(serde_json::json!({ "error": "Internal server error" })),
     )
 }
 
