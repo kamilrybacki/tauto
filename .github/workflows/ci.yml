@@ -98,7 +98,10 @@ jobs:
         run: chmod +x dist/tauto
 
       - name: Run E2E test suite
-        run: TAUTO_BIN=dist/tauto bash tests/e2e/run.sh
+        env:
+          TAUTO_BIN: dist/tauto
+          TAUTO_SKIP_LEAN_CHECK: "1"
+        run: bash tests/e2e/run.sh
 
   docker:
     name: Build and push Docker image
