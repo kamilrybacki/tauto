@@ -75,12 +75,20 @@ transition, or **isolated** states no rule touches at all (a declared state you
 haven't written a rule for yet).
 
 When real data exists, `GET /api/v1/reconcile` (MCP `reconcile_states`) completes
-the declared state domains against observed ones. A **state source** — a live
-database when configured, else a `_observed_states.json` descriptor (mapping
-`Entity.field: [values]`), else none — yields the observed states, and tauto
-reports per field the `observed_not_declared` (suggested completions) and
-`declared_not_observed` (unseen). Advisory and additive: it proposes completions,
-never rewrites the glossary — logic set up before data stays valid.
+the declared state domains against observed ones. A **state source** yields the
+observed states, and tauto reports per field the `observed_not_declared`
+(suggested completions) and `declared_not_observed` (unseen). Source precedence:
+
+1. **live database** (when configured) — see below;
+2. **ODCS data contracts** — any `*.odcs.yaml` (Open Data Contract Standard) in
+   the contracts dir; allowed values are read from each property's
+   `invalidValues` quality rule (`arguments.validValues`) and mapped to a
+   glossary entity/state field (see `examples/odcs/`);
+3. **native descriptor** — a `_observed_states.json` mapping `Entity.field: [values]`;
+4. **none**.
+
+Advisory and additive: it proposes completions, never rewrites the glossary —
+logic set up before data stays valid.
 
 The live-database source is behind the `database` Cargo feature (off by default,
 keeping the core build dependency-free):

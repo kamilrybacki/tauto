@@ -1,0 +1,41 @@
+# Sample ODCS (Open Data Contract Standard) data contract.
+#
+# Drop a `*.odcs.yaml` file into the contracts directory and tauto's reconcile
+# endpoint reads the allowed values of each state column from it (precedence:
+# database -> odcs -> native json -> none).
+#
+# Allowed values are expressed the ODCS way: a data-quality rule on the property
+# with metric `invalidValues` and `arguments.validValues`. tauto maps the schema
+# object to a glossary entity (by name, physicalName, or aka — case-insensitive)
+# and the property to a state field, then reconciles.
+#
+# Here the contract's status domain includes `Defaulted` and `Delinquent`, which
+# the example glossary does not declare — reconcile reports them as suggested
+# completions.
+
+kind: DataContract
+apiVersion: v3.1.0
+id: mortgage-core
+status: active
+
+schema:
+  - name: Mortgage
+    physicalName: mortgages
+    properties:
+      - name: status
+        physicalName: loan_status
+        logicalType: string
+        quality:
+          - metric: invalidValues
+            arguments:
+              validValues:
+                - UnderReview
+                - Approved
+                - Rejected
+                - Funded
+                - Closed
+                - Refinanced
+                - Defaulted
+                - Delinquent
+      - name: credit_score
+        logicalType: integer

@@ -387,12 +387,17 @@ assumes:
   A glossary is declared <em>first</em>, before any data need exist — logic can be
   authored up front. When real datasets are present, their state domains can
   <em>complete</em> the declared ones. <em>tauto</em> reconciles the two: a
-  <em>state source</em> (a live database, an ODCS data contract, or a native
-  descriptor file) yields the states observed for each field, and tauto reports,
-  per state field, <code>observed_not_declared</code> (states in the data the
-  glossary is missing — suggested completions) and <code>declared_not_observed</code>
-  (declared but unseen — a future state or a typo). Source precedence is
-  database&nbsp;&rarr;&nbsp;file&nbsp;&rarr;&nbsp;none, reported in the response.
+  <em>state source</em> yields the states observed for each field, and tauto
+  reports, per state field, <code>observed_not_declared</code> (states in the data
+  the glossary is missing — suggested completions) and
+  <code>declared_not_observed</code> (declared but unseen — a future state or a
+  typo). Source precedence is
+  database&nbsp;&rarr;&nbsp;ODCS&nbsp;&rarr;&nbsp;file&nbsp;&rarr;&nbsp;none,
+  reported in the response. The <em>ODCS</em> source reads any
+  <code>*.odcs.yaml</code> (Open Data Contract Standard) contract in the contracts
+  directory, taking a column's allowed values from its <code>invalidValues</code>
+  data-quality rule (<code>arguments.validValues</code>) and mapping the schema
+  object and property onto a glossary entity and state field.
 </p>
 
 <div class="theorem-env remark">
