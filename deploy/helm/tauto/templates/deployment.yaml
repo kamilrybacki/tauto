@@ -1,69 +1,66 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "tauto.fullname" . }}
+  name: tauto
+  namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "tauto.labels" . | nindent 4 }}
+    app: tauto
 spec:
-  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 2
+  replicas: {{ .Values.replicas }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
-      {{- include "tauto.selectorLabels" . | nindent 6 }}
+      app: tauto
   template:
     metadata:
       labels:
-        {{- include "tauto.selectorLabels" . | nindent 8 }}
+        app: tauto
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: tauto
-          image: {{ include "tauto.image" . }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports:
-            - name: http
-              containerPort: 4000
-              protocol: TCP
-          env:
-            - name: TAUTO_SKIP_LEAN_CHECK
-              value: "1"
-            {{- range $k, $v := .Values.env }}
-            - name: {{ $k }}
-              value: {{ $v | quote }}
-            {{- end }}
           args:
             - serve
             - /contracts
             - --port
-            - "4000"
+            - {{ .Values.port | quote }}
             - --ui-dist
             - /opt/tauto/ui/dist
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+              protocol: TCP
+          env:
+            - name: TAUTO_SKIP_LEAN_CHECK
+              value: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
           volumeMounts:
             - name: contracts
               mountPath: /contracts
-              readOnly: true
-          livenessProbe:
-            httpGet:
-              path: /api/v1/contracts
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 30
-          readinessProbe:
-            httpGet:
-              path: /api/v1/contracts
-              port: http
-            initialDelaySeconds: 3
-            periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
         - name: contracts
-          {{- if eq .Values.contracts.source "hostPath" }}
-          hostPath:
-            path: {{ .Values.contracts.hostPath.path }}
-            type: Directory
-          {{- else if eq .Values.contracts.source "pvc" }}
           persistentVolumeClaim:
-            claimName: {{ .Values.contracts.pvc.existingClaim | default (include "tauto.fullname" .) }}
-          {{- else if eq .Values.contracts.source "configmap" }}
-          configMap:
-            name: {{ include "tauto.fullname" . }}-contracts
-          {{- end }}
+            claimName: tauto-contracts

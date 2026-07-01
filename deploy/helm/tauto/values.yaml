@@ -2,56 +2,26 @@ image:
   repository: ghcr.io/kamilrybacki/tauto
   # Pinned to the published image's short commit SHA. CI bumps this on every
   # main build (see the "Pin chart image tag" step in .github/workflows/ci.yml),
-  # so the chart always tracks the latest image while staying immutable for
-  # GitOps / ArgoCD change detection.
+  # so the chart tracks the latest image while staying an immutable, ArgoCD-
+  # friendly pin. The image is public — no pull secret needed.
   tag: "0ac521d"
   pullPolicy: IfNotPresent
 
-# How contracts reach the container.
-# "hostPath"  — mount a directory from the k3s node (default; single-node homelab)
-# "pvc"       — use an existing or dynamically-provisioned PersistentVolumeClaim
-# "configmap" — embed small contracts inline (≤1 MB ConfigMap limit)
-contracts:
-  source: hostPath
+replicas: 1
+port: 4000
 
-  hostPath:
-    path: /opt/tauto/contracts   # absolute path on the k3s node
+# Public hostname the Traefik IngressRoute matches. Placeholder default — the
+# real host is injected as an ArgoCD Application helm parameter, so it stays out
+# of this public repo.
+host: tauto.example.com
 
-  pvc:
-    existingClaim: ""            # leave empty to create one
-    storageClass: local-path     # k3s default
-    accessMode: ReadWriteOnce
-    size: 1Gi
+storage:
+  size: 1Gi
+  storageClass: nfs
 
-  # Only used when source=configmap.
-  # Key = filename (must end in .md), value = file content.
-  configmap:
-    files: {}
-    # Example:
-    # files:
-    #   orders.md: |
-    #     ```contract
-    #     case CancelPaidOrder
-    #     entity:
-    #       Order
-    #     ...
-    #     ```
-
-replicaCount: 1
-
-service:
-  type: ClusterIP
-  port: 4000
-
-ingress:
-  enabled: true
-  ingressClassName: caddy        # change to "nginx" etc. if needed
-  host: tauto.homelab.local
-  tls: []
-  # tls:
-  #   - hosts:
-  #       - tauto.homelab.local
-  #     secretName: tauto-tls
+# LAN CIDR the NetworkPolicy admits. Placeholder default — the real subnet is
+# injected as an ArgoCD Application helm parameter (kept out of this public repo).
+allowedLanCidr: 10.0.0.0/8
 
 resources:
   requests:
@@ -61,7 +31,14 @@ resources:
     cpu: 200m
     memory: 128Mi
 
-# Extra environment variables injected into the container.
-env: {}
-# env:
-#   MY_VAR: value
+probes:
+  liveness:
+    path: /api/v1/contracts
+    initialDelaySeconds: 5
+    periodSeconds: 30
+    failureThreshold: 3
+  readiness:
+    path: /api/v1/contracts
+    initialDelaySeconds: 3
+    periodSeconds: 10
+    failureThreshold: 2

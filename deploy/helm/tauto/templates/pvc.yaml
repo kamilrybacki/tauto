@@ -1,15 +1,12 @@
-{{- if and (eq .Values.contracts.source "pvc") (not .Values.contracts.pvc.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "tauto.fullname" . }}
-  labels:
-    {{- include "tauto.labels" . | nindent 4 }}
+  name: tauto-contracts
+  namespace: {{ .Release.Namespace }}
 spec:
   accessModes:
-    - {{ .Values.contracts.pvc.accessMode }}
-  storageClassName: {{ .Values.contracts.pvc.storageClass }}
+    - ReadWriteOnce
+  storageClassName: {{ .Values.storage.storageClass }}
   resources:
     requests:
-      storage: {{ .Values.contracts.pvc.size }}
-{{- end }}
+      storage: {{ .Values.storage.size }}

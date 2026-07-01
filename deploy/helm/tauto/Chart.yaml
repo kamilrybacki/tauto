@@ -1,6 +1,6 @@
 apiVersion: v2
 name: tauto
-description: Business logic contract explorer with Lean 4 verification
+description: tauto — business logic contract browser (theorem graph web UI)
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
