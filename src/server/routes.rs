@@ -13,7 +13,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use crate::contract_ir::{find_conflict_candidates, ContractIR, ContractSet};
 use crate::contract_parser::{extract_contract_blocks, parse_contract_block};
-use crate::glossary::{self, Glossary, GlossaryWarning};
+use crate::glossary::{self, Glossary, GlossaryWarning, StateCoverage};
 use crate::lean_gen::{generate_lean_workspace, run_lake_build, write_lean_workspace};
 use crate::scanner::{scan_glossary, scan_path};
 use crate::test_gen;
@@ -633,6 +633,21 @@ async fn handle_glossary(State(state): State<Arc<ServerState>>) -> ApiResult<Glo
         .map_err(api_err)
 }
 
+// ── /api/v1/lifecycle ─────────────────────────────────────────────────────────
+
+async fn handle_lifecycle(State(state): State<Arc<ServerState>>) -> ApiResult<Vec<StateCoverage>> {
+    let path = state.contracts_path.clone();
+    tokio::task::spawn_blocking(move || {
+        let (cs, _, _) = scan_path(&path)?;
+        let glossary = scan_glossary(&path)?;
+        Ok::<_, std::io::Error>(glossary::analyze_lifecycle(&cs, &glossary))
+    })
+    .await
+    .map_err(api_err)?
+    .map(Json)
+    .map_err(api_err)
+}
+
 // ── entry point ───────────────────────────────────────────────────────────────
 
 pub fn run_serve(
@@ -670,6 +685,7 @@ async fn serve_inner(
         .route("/api/v1/proofs", get(handle_proofs))
         .route("/api/v1/check", post(handle_check))
         .route("/api/v1/glossary", get(handle_glossary))
+        .route("/api/v1/lifecycle", get(handle_lifecycle))
         .with_state(state)
         .fallback_service(serve_dir);
 

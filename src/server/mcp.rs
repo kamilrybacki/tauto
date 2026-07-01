@@ -146,7 +146,8 @@ proposed rule before it is saved, use check_rule: it dry-runs the rule against \
 the current set (writing nothing) and returns a compatibility verdict, a \
 generated test suite, and advisory glossary warnings. Call get_glossary first \
 to learn the domain vocabulary (entities, their field prefixes, enums, \
-operations) so a rule stays consistent.",
+operations) so a rule stays consistent, and state_coverage to see each \
+entity's lifecycle (states, transitions, and unhandled/isolated states).",
     })
 }
 
@@ -230,6 +231,12 @@ fn tool_definitions() -> Value {
             "title": "Get the domain glossary",
             "description": "Return the domain vocabulary: each entity's canonical name, `aka` instance prefixes (how its fields are addressed in rules, e.g. `loan.credit_score` for Mortgage), declared fields and enum values, operations, and prose. Consult this BEFORE translating a rule so you use the right entity and don't confuse one entity's terms (e.g. Order) with another's (e.g. Package).",
             "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "state_coverage",
+            "title": "State-machine coverage",
+            "description": "For each entity state field, return the declared state domain, the transitions the current rules define over it (source state from a requires guard → target state from ensures), and coverage gaps: states with no incoming transition (candidate initial/unreachable), no outgoing (candidate terminal/dead-end), isolated (touched by no rule — a likely gap), and undeclared states used by a rule but missing from the glossary. Use it to see whether an entity's lifecycle is fully handled before adding a rule.",
+            "inputSchema": { "type": "object", "properties": {} }
         }
     ])
 }
@@ -249,6 +256,7 @@ fn handle_tool_call(ctx: &Ctx, id: Value, req: &Value) -> Value {
         "verify_contract" => tool_verify_contract(ctx, &args),
         "check_rule" => tool_check_rule(ctx, &args),
         "get_glossary" => tool_get_glossary(ctx, &args),
+        "state_coverage" => tool_state_coverage(ctx, &args),
         other => Err(format!("unknown tool: {other}")),
     };
 
@@ -515,6 +523,14 @@ fn tool_get_glossary(ctx: &Ctx, _args: &Value) -> Result<String, String> {
         "count": entities.len(),
         "entities": entities,
         "note": "The domain vocabulary. Use the canonical entity names, their `aka` instance prefixes (how fields are addressed, e.g. loan.credit_score), declared fields/enums, and operations when authoring a rule so it stays consistent with this domain.",
+    })))
+}
+
+fn tool_state_coverage(ctx: &Ctx, _args: &Value) -> Result<String, String> {
+    let reports = ctx.get_json("/api/v1/lifecycle")?;
+    Ok(pretty(&json!({
+        "coverage": reports,
+        "note": "Per entity state field: declared states, the transitions the rules define, and gaps (no_incoming = candidate initial/unreachable, no_outgoing = candidate terminal, isolated = untouched → likely a missing rule, undeclared_states = used but not in the glossary → completable from data).",
     })))
 }
 
