@@ -1,5 +1,5 @@
 image:
-  repository: ghcr.io/your-org/tauto
+  repository: ghcr.io/kamilrybacki/tauto
   tag: ""          # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 
