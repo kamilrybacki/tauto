@@ -1,13 +1,22 @@
-# Case 3 — Cancel Pending Order
+# Case 3 — Close Completed Loan
 
 ```contract
-case CancelPendingOrder
+case CloseCompletedLoan
 entity:
-  Order
+  Mortgage
 operation:
-  cancelOrder
+  closeLoan
 requires:
-  order.status == Pending
+  loan.status == Funded
+  loan.final_payment_received == true
+  loan.outstanding_balance == 0
 ensures:
-  result.status == Cancelled
+  result.status == Closed
+  result.account_settled == true
+forbidden:
+  disburseFunds(loan.id)
+  extendLoanTerm(loan.id)
+preserves:
+  loan.applicant_id
+  loan.property_address
 ```

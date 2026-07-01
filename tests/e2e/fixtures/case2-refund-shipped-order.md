@@ -1,13 +1,25 @@
-# Case 2 — Refund Shipped Order
+# Case 2 — Disburse Funds After Closing
 
 ```contract
-case RefundShippedOrder
+case DisburseFundsAfterClosing
 entity:
-  Order
+  Mortgage
 operation:
-  refundOrder
+  disburseFunds
 requires:
-  order.status == Shipped
+  loan.status == Approved
+  loan.closing_documents_signed == true
+  loan.appraisal_cleared == true
+  loan.title_clear == true
 ensures:
-  result.status == Refunded
+  result.status == Funded
+  result.funds_transferred == true
+forbidden:
+  cancelLoan(loan.id)
+preserves:
+  loan.applicant_id
+  loan.property_address
+  loan.interest_rate
+assumes:
+  loan.funds_available == true
 ```

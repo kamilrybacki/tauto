@@ -1,17 +1,21 @@
-# Case 4 — Reject Ship When Paid (conflicts with Case 1)
+# Case 4 — Legacy Reject Prime Application (conflicts with Case 1)
 #
-# Same entity/operation/requires as ShipPaidOrder but contradictory ensures:
-# Case 1 says result.status == Shipped; this says result.status == Rejected.
+# Same entity/operation as ApprovePrimeMortgage but ensures result.status == Rejected
+# while Case 1 ensures result.status == Approved.
 # The upload endpoint must return 409 and roll this file back.
 
 ```contract
-case RejectShipWhenPaid
+case LegacyRejectPrimeApplication
 entity:
-  Order
+  Mortgage
 operation:
-  shipOrder
+  approveApplication
 requires:
-  order.status == Paid
+  loan.credit_score >= 750
+  loan.status == UnderReview
 ensures:
   result.status == Rejected
+  result.rejection_reason == LegacySystemOverride
+forbidden:
+  disburseFunds(loan.id)
 ```

@@ -85,7 +85,7 @@ assert_no_conflicts_in_verify() {
 
 # ── Case 1: First rule ─────────────────────────────────────────────────────────
 echo
-echo "═══ Case 1: ShipPaidOrder — first rule ═══"
+echo "═══ Case 1: ApprovePrimeMortgage — first rule ═══"
 
 code=$(upload "case1-ship-paid-order.md")
 [ "$code" = "200" ] || FAIL "upload expected HTTP 200, got $code; body: $(cat "$RESP_FILE")"
@@ -106,7 +106,7 @@ PASS "tauto verify: no Conflict candidates (Lean workspace written)"
 
 # ── Case 2: Second compatible rule ────────────────────────────────────────────
 echo
-echo "═══ Case 2: RefundShippedOrder — compatible (different operation) ═══"
+echo "═══ Case 2: DisburseFundsAfterClosing — compatible (different operation) ═══"
 
 code=$(upload "case2-refund-shipped-order.md")
 [ "$code" = "200" ] || FAIL "upload expected HTTP 200, got $code; body: $(cat "$RESP_FILE")"
@@ -125,7 +125,7 @@ PASS "tauto verify: no Conflict candidates (rules are logically compatible)"
 
 # ── Case 3: Third compatible rule ─────────────────────────────────────────────
 echo
-echo "═══ Case 3: CancelPendingOrder — compatible (different operation) ═══"
+echo "═══ Case 3: CloseCompletedLoan — compatible (different operation) ═══"
 
 code=$(upload "case3-cancel-pending-order.md")
 [ "$code" = "200" ] || FAIL "upload expected HTTP 200, got $code; body: $(cat "$RESP_FILE")"
@@ -144,7 +144,7 @@ PASS "tauto verify: no Conflict candidates (all 3 rules logically compatible)"
 
 # ── Case 4: Conflicting rule — must be rejected ────────────────────────────────
 echo
-echo "═══ Case 4: RejectShipWhenPaid — conflicts with Case 1, must be rejected ═══"
+echo "═══ Case 4: LegacyRejectPrimeApplication — conflicts with Case 1, must be rejected ═══"
 
 code=$(upload "case4-conflict-ship-order.md")
 [ "$code" = "409" ] \
