@@ -82,6 +82,19 @@ reports per field the `observed_not_declared` (suggested completions) and
 `declared_not_observed` (unseen). Advisory and additive: it proposes completions,
 never rewrites the glossary — logic set up before data stays valid.
 
+The live-database source is behind the `database` Cargo feature (off by default,
+keeping the core build dependency-free):
+
+```bash
+cargo build --release --features database
+DATABASE_URL=postgres://user:pass@host/db tauto serve ./rules
+```
+
+It reads the distinct values of each state field's column — mapping entity
+`Mortgage` → table `mortgage` and a state field `status` → column `status` — via
+`SELECT DISTINCT`. Identifiers are validated and quoted; a missing table/column
+is skipped, and if no database is reachable it falls back to the file descriptor.
+
 ## Commands
 
 | Command | Purpose |

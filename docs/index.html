@@ -404,6 +404,17 @@ assumes:
   and the <code>reconcile_states</code> MCP tool.
 </div>
 
+<p>
+  The live-database state source (behind the <code>database</code> build feature,
+  configured with <code>DATABASE_URL</code>) reads the distinct values of each
+  state field's column — mapping entity <code>Mortgage</code> to table
+  <code>mortgage</code> and a state field <code>status</code> to column
+  <code>status</code>. Identifiers are validated against
+  <code>[A-Za-z_][A-Za-z0-9_]*</code> and quoted before interpolation, so no
+  schema-derived name can escape the query; an absent table or column is skipped,
+  and an unreachable database falls back to the file descriptor.
+</p>
+
 <h2 id="lean"><span class="secnum">6</span> The Lean Backend</h2>
 
 <p>
