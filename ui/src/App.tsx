@@ -1,22 +1,29 @@
 import { useState, useEffect } from 'react';
-import { fetchContracts, fetchGraph } from './api/client';
-import type { ContractsResponse, ContractItem, GraphResponse } from './api/types';
+import { fetchContracts, fetchGraph, fetchHistory } from './api/client';
+import type { ContractsResponse, ContractItem, GraphResponse, HistoryEntry } from './api/types';
 import ContractGraph from './components/ContractGraph';
 import ContractList from './components/ContractList';
 import ContractDetail from './components/ContractDetail';
+import HistoryPanel from './components/HistoryPanel';
+import ProofsPanel from './components/ProofsPanel';
 
-type View = 'graph' | 'list';
+type View = 'graph' | 'list' | 'history' | 'proofs';
 
 export default function App() {
   const [contracts, setContracts] = useState<ContractsResponse | null>(null);
   const [graph, setGraph] = useState<GraphResponse | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [selected, setSelected] = useState<ContractItem | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>('graph');
 
   useEffect(() => {
-    Promise.all([fetchContracts(), fetchGraph()])
-      .then(([c, g]) => { setContracts(c); setGraph(g); })
+    Promise.all([fetchContracts(), fetchGraph(), fetchHistory()])
+      .then(([c, g, h]) => {
+        setContracts(c);
+        setGraph(g);
+        setHistory(h.entries);
+      })
       .catch((e: Error) => setError(e.message));
   }, []);
 
@@ -60,11 +67,18 @@ export default function App() {
           <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}>
             List
           </button>
+          <button className={view === 'history' ? 'active' : ''} onClick={() => setView('history')}>
+            History
+            {history.length > 0 && <span className="nav-count">{history.length}</span>}
+          </button>
+          <button className={view === 'proofs' ? 'active' : ''} onClick={() => setView('proofs')}>
+            Proofs
+          </button>
         </nav>
       </header>
 
       <main className="main">
-        {view === 'graph' ? (
+        {view === 'graph' && (
           <div className="graph-layout">
             <ContractGraph
               graph={graph}
@@ -75,13 +89,16 @@ export default function App() {
               <ContractDetail contract={selected} onClose={() => setSelected(null)} />
             )}
           </div>
-        ) : (
+        )}
+        {view === 'list' && (
           <ContractList
             contracts={contracts.items}
             selected={selected}
             onSelect={item => setSelected(item)}
           />
         )}
+        {view === 'history' && <HistoryPanel entries={history} />}
+        {view === 'proofs' && <ProofsPanel />}
       </main>
     </div>
   );

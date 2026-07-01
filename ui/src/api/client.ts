@@ -1,4 +1,4 @@
-import type { ContractsResponse, GraphResponse } from './types';
+import type { ContractsResponse, GraphResponse, HistoryResponse, ProofsResponse } from './types';
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -14,3 +14,9 @@ export const fetchContracts = (): Promise<ContractsResponse> =>
 
 export const fetchGraph = (): Promise<GraphResponse> =>
   get<GraphResponse>('/api/v1/graph');
+
+export const fetchHistory = (): Promise<HistoryResponse> =>
+  get<HistoryResponse>('/api/v1/history');
+
+export const fetchProofs = (): Promise<ProofsResponse> =>
+  get<ProofsResponse>('/api/v1/proofs');

@@ -14,17 +14,28 @@ COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src/
 RUN cargo build --release
 
-# Stage 3: minimal runtime image
+# Stage 3: download and warm up the Lean toolchain.
+# Running `lake --version` forces elan to download the stable toolchain into
+# this layer so the runtime image never fetches anything at start.
+FROM debian:bookworm-slim AS lean-installer
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+    | sh -s -- -y --default-toolchain leanprover/lean4:stable \
+    && /root/.elan/bin/lake --version
+
+# Stage 4: minimal runtime image
 FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libssl3 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=rust-builder /build/target/release/tauto /usr/local/bin/tauto
-COPY --from=ui-builder   /build/ui/dist              /opt/tauto/ui/dist
+COPY --from=rust-builder   /build/target/release/tauto /usr/local/bin/tauto
+COPY --from=ui-builder     /build/ui/dist               /opt/tauto/ui/dist
+COPY --from=lean-installer /root/.elan                  /root/.elan
 
-# The serve subcommand never calls lake; skip the startup Lean check.
-ENV TAUTO_SKIP_LEAN_CHECK=1
+ENV PATH="/root/.elan/bin:$PATH"
 
 EXPOSE 4000
 

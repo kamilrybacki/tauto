@@ -1,19 +1,24 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Multipart, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex as AsyncMutex;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::contract_ir::{find_conflict_candidates, ContractIR, ContractSet};
+use crate::lean_gen::{generate_lean_workspace, run_lake_build, write_lean_workspace};
 use crate::scanner::scan_path;
 
 struct ServerState {
     contracts_path: PathBuf,
+    history_path: PathBuf,
+    history_lock: AsyncMutex<()>,
 }
 
 type ApiResult<T> = Result<Json<T>, (StatusCode, Json<serde_json::Value>)>;
@@ -69,7 +74,6 @@ fn contract_item(c: &ContractIR) -> ContractItem {
 
 async fn handle_contracts(State(state): State<Arc<ServerState>>) -> ApiResult<ContractsResponse> {
     let (cs, _, files) = scan_path(&state.contracts_path).map_err(api_err)?;
-    // Deduplicate by key so multiple fixture dirs don't show duplicates
     let mut seen: HashSet<String> = HashSet::new();
     let items: Vec<ContractItem> = cs
         .contracts
@@ -77,11 +81,7 @@ async fn handle_contracts(State(state): State<Arc<ServerState>>) -> ApiResult<Co
         .filter(|c| seen.insert(format!("{}/{}/{}", c.entity, c.operation, c.case)))
         .map(contract_item)
         .collect();
-    Ok(Json(ContractsResponse {
-        contracts: items.len(),
-        files,
-        items,
-    }))
+    Ok(Json(ContractsResponse { contracts: items.len(), files, items }))
 }
 
 // ── /api/v1/graph ─────────────────────────────────────────────────────────────
@@ -123,7 +123,6 @@ fn contract_key(c: &ContractIR) -> String {
 }
 
 fn build_graph(cs: &ContractSet) -> GraphResponse {
-    // Deduplicate contracts by key (entity/operation/case) — keep first occurrence
     let mut seen_keys: HashSet<String> = HashSet::new();
     let unique: Vec<&ContractIR> = cs
         .contracts
@@ -146,7 +145,6 @@ fn build_graph(cs: &ContractSet) -> GraphResponse {
         })
         .collect();
 
-    // Build a deduplicated ContractSet for conflict detection
     let deduped_set = ContractSet::new(unique.iter().map(|c| (*c).clone()).collect());
     let conflict_candidates = find_conflict_candidates(&deduped_set);
     let conflict_pairs: HashSet<(String, String)> = conflict_candidates
@@ -156,10 +154,8 @@ fn build_graph(cs: &ContractSet) -> GraphResponse {
 
     let mut edges: Vec<GraphEdge> = Vec::new();
     let mut idx = 0usize;
-    // Track emitted same_op pairs to avoid duplicates
     let mut emitted: HashSet<(String, String)> = HashSet::new();
 
-    // same_op edges: unique contracts sharing entity+operation (but different case)
     let mut by_op: HashMap<String, Vec<&ContractIR>> = HashMap::new();
     for c in &unique {
         by_op.entry(format!("{}::{}", c.entity, c.operation)).or_default().push(c);
@@ -172,7 +168,6 @@ fn build_graph(cs: &ContractSet) -> GraphResponse {
             for j in (i + 1)..group.len() {
                 let id_a = contract_key(group[i]);
                 let id_b = contract_key(group[j]);
-                // Skip self-loops and already-emitted pairs
                 if id_a == id_b {
                     continue;
                 }
@@ -181,7 +176,6 @@ fn build_graph(cs: &ContractSet) -> GraphResponse {
                 if emitted.contains(&pair) || emitted.contains(&pair_rev) {
                     continue;
                 }
-                // Skip pairs that are already conflict candidates (conflict edge takes priority)
                 if conflict_pairs.contains(&pair) || conflict_pairs.contains(&pair_rev) {
                     continue;
                 }
@@ -198,7 +192,6 @@ fn build_graph(cs: &ContractSet) -> GraphResponse {
         }
     }
 
-    // conflict edges
     for c in &conflict_candidates {
         edges.push(GraphEdge {
             id: format!("e{idx}"),
@@ -218,6 +211,167 @@ async fn handle_graph(State(state): State<Arc<ServerState>>) -> ApiResult<GraphR
     Ok(Json(build_graph(&cs)))
 }
 
+// ── /api/v1/history ───────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+enum HistoryOutcome {
+    Accepted,
+    Rejected,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct ConflictInfo {
+    key_a: String,
+    key_b: String,
+    reason: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct HistoryEntry {
+    id: u64,
+    timestamp_unix: u64,
+    filename: String,
+    outcome: HistoryOutcome,
+    contracts_count: usize,
+    parse_errors: usize,
+    #[serde(default)]
+    conflicts: Vec<ConflictInfo>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct HistoryFile {
+    entries: Vec<HistoryEntry>,
+}
+
+fn read_history(path: &Path) -> Vec<HistoryEntry> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<HistoryFile>(&s).ok())
+        .map(|h| h.entries)
+        .unwrap_or_default()
+}
+
+fn write_history(path: &Path, entries: &[HistoryEntry]) {
+    let file = HistoryFile { entries: entries.to_vec() };
+    if let Ok(json) = serde_json::to_string_pretty(&file) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+async fn record_history(
+    state: &Arc<ServerState>,
+    filename: String,
+    outcome: HistoryOutcome,
+    contracts_count: usize,
+    parse_errors: usize,
+    conflicts: Vec<ConflictInfo>,
+) {
+    let history_path = state.history_path.clone();
+    let _guard = state.history_lock.lock().await;
+    let _ = tokio::task::spawn_blocking(move || {
+        let timestamp_unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let mut entries = read_history(&history_path);
+        let id = entries.len() as u64 + 1;
+        entries.push(HistoryEntry { id, timestamp_unix, filename, outcome, contracts_count, parse_errors, conflicts });
+        write_history(&history_path, &entries);
+    })
+    .await;
+}
+
+#[derive(Serialize)]
+struct HistoryResponse {
+    entries: Vec<HistoryEntry>,
+}
+
+async fn handle_history(State(state): State<Arc<ServerState>>) -> ApiResult<HistoryResponse> {
+    let history_path = state.history_path.clone();
+    let entries = tokio::task::spawn_blocking(move || read_history(&history_path))
+        .await
+        .map_err(|e| api_err(e.to_string()))?;
+    let mut reversed = entries;
+    reversed.reverse();
+    Ok(Json(HistoryResponse { entries: reversed }))
+}
+
+// ── /api/v1/proofs ────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct LeanFileEntry {
+    path: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+struct ProofsResponse {
+    contracts: usize,
+    sorry_count: usize,
+    files: Vec<LeanFileEntry>,
+    build_available: bool,
+    build_success: bool,
+    build_stdout: String,
+    build_stderr: String,
+}
+
+async fn handle_proofs(State(state): State<Arc<ServerState>>) -> ApiResult<ProofsResponse> {
+    let (cs, _, _) = scan_path(&state.contracts_path).map_err(api_err)?;
+
+    if cs.contracts.is_empty() {
+        return Ok(Json(ProofsResponse {
+            contracts: 0,
+            sorry_count: 0,
+            files: vec![],
+            build_available: false,
+            build_success: false,
+            build_stdout: String::new(),
+            build_stderr: "No contracts loaded — upload at least one contract first.".to_owned(),
+        }));
+    }
+
+    let workspace = generate_lean_workspace(&cs);
+    let sorry_count = workspace
+        .files
+        .iter()
+        .map(|f| f.content.matches("sorry").count())
+        .sum();
+    let files: Vec<LeanFileEntry> = workspace
+        .files
+        .iter()
+        .map(|f| LeanFileEntry { path: f.path.clone(), content: f.content.clone() })
+        .collect();
+
+    let build_dir = tempfile::tempdir().map_err(|e| api_err(e.to_string()))?;
+    let build_path = build_dir.path().to_path_buf();
+    let workspace_clone = workspace;
+
+    let build_result = tokio::task::spawn_blocking(move || {
+        write_lean_workspace(&workspace_clone, &build_path)
+            .map_err(|e| e.to_string())?;
+        run_lake_build(&build_path).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| api_err(e.to_string()))?;
+
+    let (build_available, build_success, build_stdout, build_stderr) = match build_result {
+        Ok(r) => (true, r.success, r.stdout, r.stderr),
+        Err(e) if e.contains("lake not found") => (false, false, String::new(), e),
+        Err(e) => return Err(api_err(e)),
+    };
+
+    Ok(Json(ProofsResponse {
+        contracts: cs.contracts.len(),
+        sorry_count,
+        files,
+        build_available,
+        build_success,
+        build_stdout,
+        build_stderr,
+    }))
+}
+
 // ── POST /api/v1/contracts/upload ─────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -228,12 +382,10 @@ struct UploadResponse {
 }
 
 fn sanitize_filename(raw: &str) -> Option<String> {
-    // Strip any path components, keep only the final segment.
     let name = std::path::Path::new(raw)
         .file_name()
         .and_then(|n| n.to_str())?
         .to_owned();
-    // Enforce .md extension and restrict chars to [a-zA-Z0-9._-].
     if !name.ends_with(".md") {
         return None;
     }
@@ -252,12 +404,10 @@ async fn handle_upload(
         if field.name() != Some("file") {
             continue;
         }
-        let raw_name = field
-            .file_name()
-            .unwrap_or("upload.md")
-            .to_owned();
-        let filename = sanitize_filename(&raw_name)
-            .ok_or_else(|| api_err("Filename must be *.md with only alphanumeric, dash, dot, or underscore characters"))?;
+        let raw_name = field.file_name().unwrap_or("upload.md").to_owned();
+        let filename = sanitize_filename(&raw_name).ok_or_else(|| {
+            api_err("Filename must be *.md with only alphanumeric, dash, dot, or underscore characters")
+        })?;
 
         let bytes = field.bytes().await.map_err(|e| api_err(e))?;
         let content = std::str::from_utf8(&bytes)
@@ -269,7 +419,6 @@ async fn handle_upload(
         let (cs, parse_errors, _) = scan_path(&dest).map_err(api_err)?;
 
         // Conflict gate: reject if this upload introduces a conflict against existing rules.
-        // Roll back the written file and return 409 so the contract store stays consistent.
         let (full_cs, _, _) = scan_path(&state.contracts_path).map_err(api_err)?;
         let all_conflicts = find_conflict_candidates(&full_cs);
         if !all_conflicts.is_empty() {
@@ -280,17 +429,32 @@ async fn handle_upload(
                 .collect();
             let introduced: Vec<_> = all_conflicts
                 .iter()
-                .filter(|c| {
-                    uploaded_keys.contains(&c.key_a) || uploaded_keys.contains(&c.key_b)
-                })
+                .filter(|c| uploaded_keys.contains(&c.key_a) || uploaded_keys.contains(&c.key_b))
                 .collect();
             if !introduced.is_empty() {
                 std::fs::remove_file(&dest).ok();
+                let conflict_infos: Vec<ConflictInfo> = introduced
+                    .iter()
+                    .map(|c| ConflictInfo {
+                        key_a: c.key_a.clone(),
+                        key_b: c.key_b.clone(),
+                        reason: c.reason.clone(),
+                    })
+                    .collect();
+                record_history(
+                    &state,
+                    filename.clone(),
+                    HistoryOutcome::Rejected,
+                    cs.contracts.len(),
+                    parse_errors,
+                    conflict_infos.clone(),
+                )
+                .await;
                 return Err((
                     StatusCode::CONFLICT,
                     Json(serde_json::json!({
                         "error": "Contract conflicts with existing rules",
-                        "conflicts": introduced.iter().map(|c| serde_json::json!({
+                        "conflicts": conflict_infos.iter().map(|c| serde_json::json!({
                             "key_a": c.key_a,
                             "key_b": c.key_b,
                             "reason": c.reason
@@ -299,6 +463,16 @@ async fn handle_upload(
                 ));
             }
         }
+
+        record_history(
+            &state,
+            filename.clone(),
+            HistoryOutcome::Accepted,
+            cs.contracts.len(),
+            parse_errors,
+            vec![],
+        )
+        .await;
 
         return Ok(Json(UploadResponse {
             filename,
@@ -327,17 +501,23 @@ async fn serve_inner(
     port: u16,
     ui_dist: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let state = Arc::new(ServerState { contracts_path: contracts_path.clone() });
+    let history_path = contracts_path.join("_history.json");
+    let state = Arc::new(ServerState {
+        contracts_path: contracts_path.clone(),
+        history_path,
+        history_lock: AsyncMutex::new(()),
+    });
+
     let index_html = ui_dist.join("index.html");
-    let serve_dir =
-        ServeDir::new(&ui_dist).not_found_service(ServeFile::new(index_html));
+    let serve_dir = ServeDir::new(&ui_dist).not_found_service(ServeFile::new(index_html));
 
     // No CORS middleware: the SPA is served by the same process (same-origin).
-    // Adding permissive CORS would allow any website to exfiltrate local contracts.
     let app = Router::new()
         .route("/api/v1/contracts", get(handle_contracts))
         .route("/api/v1/contracts/upload", post(handle_upload))
         .route("/api/v1/graph", get(handle_graph))
+        .route("/api/v1/history", get(handle_history))
+        .route("/api/v1/proofs", get(handle_proofs))
         .with_state(state)
         .fallback_service(serve_dir);
 
