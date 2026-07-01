@@ -13,6 +13,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use crate::contract_ir::{find_conflict_candidates, ContractIR, ContractSet};
 use crate::contract_parser::{extract_contract_blocks, parse_contract_block};
+use crate::glossary::odcs_source::OdcsStateSource;
 use crate::glossary::{
     self, FileStateSource, Glossary, GlossaryWarning, ObservedDomains, ReconcileReport,
     StateCoverage, StateSource,
@@ -671,6 +672,19 @@ fn file_or_none(dir: &Path) -> (ObservedDomains, &'static str) {
     }
 }
 
+/// File-based source precedence: ODCS data contracts (`*.odcs.yaml`) → native
+/// JSON descriptor → none.
+fn file_sources(dir: &Path, glossary: &Glossary) -> (ObservedDomains, &'static str) {
+    let odcs = OdcsStateSource::new(dir, glossary.clone());
+    if odcs.exists() {
+        match odcs.observed_domains() {
+            Ok(o) => return (o, "odcs"),
+            Err(e) => eprintln!("[reconcile:odcs] {e}"),
+        }
+    }
+    file_or_none(dir)
+}
+
 /// Reconcile the glossary's declared state domains against observed ones.
 /// Source precedence: a live database (when configured) → a `_observed_states.json`
 /// descriptor in the contracts dir → none. Advisory: proposes completions, never
@@ -687,9 +701,9 @@ async fn handle_reconcile(State(state): State<Arc<ServerState>>) -> ApiResult<Re
             Some(Ok(o)) => (o, "database"),
             Some(Err(e)) => {
                 eprintln!("[reconcile:db] {e}");
-                file_or_none(&path)
+                file_sources(&path, &glossary)
             }
-            None => file_or_none(&path),
+            None => file_sources(&path, &glossary),
         };
 
         Ok::<_, std::io::Error>(glossary::reconcile(&glossary, &observed, source))

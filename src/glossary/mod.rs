@@ -1,6 +1,7 @@
 pub mod db_source;
 pub mod lifecycle;
 pub mod models;
+pub mod odcs_source;
 pub mod parser;
 pub mod reconcile;
 pub mod validate;
