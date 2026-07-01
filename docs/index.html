@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>tauto — A Language and Toolchain for Business-Rule Contracts</title>
+  <meta name="description" content="tauto: a Lean-backed toolchain for authoring, validating, and testing business-rule contracts written in a small declarative language.">
+  <link rel="stylesheet" href="latex.css">
+  <style>
+    /* amsthm-style environments layered on top of latex.css */
+    body { max-width: 52rem; }
+    .abstract {
+      margin: 2rem auto;
+      max-width: 42rem;
+      font-size: 0.95rem;
+    }
+    .abstract h2 {
+      text-align: center;
+      font-size: 1rem;
+      font-variant: small-caps;
+      margin-bottom: 0.5rem;
+    }
+    .theorem-env {
+      margin: 1.25rem 0;
+      padding: 0.4rem 1rem;
+      border-left: 3px solid #444;
+      background: #fafafa;
+    }
+    .theorem-env .env-title { font-weight: bold; font-style: normal; }
+    .definition .env-title { font-style: normal; }
+    .example { border-left-color: #888; background: #fbfbfb; }
+    .remark  { border-left-color: #bbb; background: #fcfcfc; font-size: 0.95rem; }
+    .limitation { border-left-color: #a33; background: #fdf7f7; }
+    .grammar {
+      font-family: 'Latin Modern', 'Menlo', monospace;
+      background: #f6f6f6;
+      padding: 1rem;
+      border: 1px solid #e2e2e2;
+      border-radius: 3px;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      overflow-x: auto;
+    }
+    table.api td, table.api th { text-align: left; vertical-align: top; }
+    table.api code { white-space: nowrap; }
+    .author-block { text-align: center; margin-bottom: 0.5rem; }
+    .subtitle { text-align: center; font-style: italic; color: #444; margin-top: -0.5rem; }
+    footer { margin-top: 4rem; padding-top: 1rem; border-top: 1px solid #ddd; font-size: 0.85rem; color: #666; }
+    h2 .secnum, h3 .secnum { margin-right: 0.5rem; }
+    .keyword { color: #005; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+<h1>tauto</h1>
+<p class="subtitle">A Language and Toolchain for Business-Rule Contracts</p>
+<p class="author-block">
+  A Lean-backed system for authoring, validating, and testing business logic<br>
+  <small>Rust core · Lean 4 proof workspace · web interface</small>
+</p>
+
+<div class="abstract">
+  <h2>Abstract</h2>
+  <p>
+    <em>tauto</em> is a toolchain for expressing business rules as machine-readable
+    <em>contracts</em> and reasoning about their mutual consistency. A contract is a
+    small declarative specification—written in fenced Markdown blocks—stating what an
+    operation <em>requires</em> of its inputs, what it <em>ensures</em> of its outputs,
+    which side effects are <em>forbidden</em>, and which fields it <em>preserves</em>.
+    From a set of such contracts the system (i) flags candidate <em>conflicts</em>
+    between rules that govern the same operation, (ii) generates a structured test
+    suite exercising each rule's boundary conditions, and (iii) emits a Lean&nbsp;4
+    workspace of proof obligations. This document specifies the contract language,
+    describes the conflict-detection and test-generation procedures, and gives a
+    practical guide to the command-line, HTTP, and web interfaces. We are explicit
+    about the method's limits: conflict detection is a sound-of-heart <em>heuristic</em>
+    that surfaces candidates for human review, and the emitted Lean theorems are
+    structural stubs, not discharged proofs.
+  </p>
+</div>
+
+<nav role="doc-toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#intro">Introduction</a></li>
+    <li><a href="#language">The Contract Language</a></li>
+    <li><a href="#conflicts">Consistency and Conflict Detection</a></li>
+    <li><a href="#testgen">Test-Suite Generation</a></li>
+    <li><a href="#lean">The Lean Backend</a></li>
+    <li><a href="#usage">Using tauto</a></li>
+    <li><a href="#limitations">Limitations</a></li>
+  </ol>
+</nav>
+
+<h2 id="intro"><span class="secnum">1</span> Introduction</h2>
+
+<p>
+  Business rules—<em>a prime mortgage may be approved only if the credit score is at
+  least 750 and employment is verified</em>—are typically scattered across code,
+  documentation, and institutional memory. When a new rule is proposed, no one can
+  easily answer the two questions that matter most: <em>is it consistent with the
+  rules we already have?</em> and <em>what tests would establish that an
+  implementation obeys it?</em>
+</p>
+
+<p>
+  <em>tauto</em> addresses both. Rules are written once, in a small language readable
+  by domain experts and machines alike, and stored as ordinary Markdown. The
+  toolchain then treats the rule set as a formal object: it detects pairs of rules
+  that cannot both hold, generates conformance tests, and produces a Lean&nbsp;4
+  scaffold for eventual mechanized proof. The design goal is <em>the lowest possible
+  barrier to entry</em>: an author needs only a text editor, and a consumer—human or
+  automated agent—needs only a single HTTP request to check a proposed rule.
+</p>
+
+<h2 id="language"><span class="secnum">2</span> The Contract Language</h2>
+
+<p>
+  A contract is introduced by a fenced code block tagged <code>contract</code>. It
+  consists of a case name and a sequence of labelled sections.
+</p>
+
+<div class="theorem-env definition">
+  <span class="env-title">Definition 2.1 (Contract).</span>
+  A <em>contract</em> <span>C</span> is a tuple
+  <span>(case, entity, operation, R, E, F, P, A)</span> where <em>case</em> is a unique
+  label, <em>entity</em> and <em>operation</em> name the governed domain object and
+  action, <span>R</span> (requires) and <span>E</span> (ensures) are sets of
+  conditions over field paths, <span>F</span> (forbidden) is a set of operations that
+  must not be invoked, <span>P</span> (preserves) is a set of fields left unchanged,
+  and <span>A</span> (assumes) is a set of ambient assumptions.
+</div>
+
+<h3><span class="secnum">2.1</span> Grammar</h3>
+
+<p>A condition compares a field path against a typed literal:</p>
+
+<div class="grammar">
+contract   ::= "case" IDENT NEWLINE section*
+section    ::= label ":" NEWLINE ( INDENT item )*
+label      ::= "entity" | "operation" | "requires" | "ensures"
+             | "forbidden" | "preserves" | "assumes"
+condition  ::= field_path OP value
+OP         ::= "==" | "!=" | ">=" | "<=" | ">" | "<"
+value      ::= INTEGER | BOOLEAN | ENUM        // ENUM begins uppercase
+forbidden  ::= IDENT "(" arg ("," arg)* ")"    // e.g. disburseFunds(loan.id)
+</div>
+
+<p>
+  The three literal kinds are distinguished lexically: <code>750</code> is an integer,
+  <code>true</code> / <code>false</code> are booleans, and an identifier beginning with
+  an uppercase letter (e.g. <code>UnderReview</code>) is an <em>enum member</em>.
+  Field paths (<code>loan.credit_score</code>) refer to attributes of the entity or of
+  the operation's result.
+</p>
+
+<h3><span class="secnum">2.2</span> Section semantics</h3>
+
+<table>
+  <thead><tr><th>Section</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>requires</code></td><td>Preconditions. The operation is defined only when all hold.</td></tr>
+    <tr><td><code>ensures</code></td><td>Postconditions guaranteed of the result when preconditions hold.</td></tr>
+    <tr><td><code>forbidden</code></td><td>Operations that must not be called during execution.</td></tr>
+    <tr><td><code>preserves</code></td><td>Fields whose value must be identical before and after.</td></tr>
+    <tr><td><code>assumes</code></td><td>Ambient facts taken as given (not checked).</td></tr>
+  </tbody>
+</table>
+
+<h3><span class="secnum">2.3</span> A worked example</h3>
+
+<div class="theorem-env example">
+  <span class="env-title">Example 2.2 (Prime-mortgage approval).</span>
+<pre><code>```contract
+case ApprovePrimeMortgage
+entity:
+  Mortgage
+operation:
+  approveApplication
+requires:
+  loan.credit_score >= 750
+  loan.debt_to_income_ratio <= 40
+  loan.employment_verified == true
+  loan.income >= 60000
+  loan.status == UnderReview
+ensures:
+  result.status == Approved
+  result.interest_rate == Standard
+  result.max_term_years == 30
+forbidden:
+  disburseFunds(loan.id)
+preserves:
+  loan.applicant_id
+  loan.property_address
+assumes:
+  loan.credit_score > 0
+```</code></pre>
+</div>
+
+<p>
+  This reads: <em>to approve a prime mortgage application, require a credit score of at
+  least 750, a debt-to-income ratio no greater than 40, verified employment, income of
+  at least $60,000, and a status of</em> <code>UnderReview</code>; <em>the result must be
+  an</em> <code>Approved</code> <em>loan at the standard rate for a 30-year term; funds
+  must not be disbursed within the approval step; and the applicant's identity and
+  property address must be preserved.</em>
+</p>
+
+<h2 id="conflicts"><span class="secnum">3</span> Consistency and Conflict Detection</h2>
+
+<p>
+  Two rules governing the same <span>(entity, operation)</span> pair are in
+  <em>tension</em> when they guarantee incompatible outcomes. <em>tauto</em> groups
+  contracts by their operation key and inspects the <code>ensures</code> sets for
+  contradictions.
+</p>
+
+<div class="theorem-env definition">
+  <span class="env-title">Definition 3.1 (Conflict candidate).</span>
+  Let <span>C₁, C₂</span> share an operation key. A <em>conflict candidate</em> is a
+  field&nbsp;<span>f</span> such that <span>C₁</span> ensures <span>f = a</span> and
+  <span>C₂</span> ensures <span>f = b</span> with <span>a ≠ b</span> (or, more
+  generally, two postconditions on <span>f</span> that cannot be simultaneously
+  satisfied).
+</div>
+
+<p>
+  When a candidate is found, <em>tauto</em> reports the two case keys and a
+  human-readable reason, e.g.
+</p>
+
+<pre><code>Mortgage/approveApplication/ApprovePrimeMortgage
+  ↔ Mortgage/approveApplication/LegacyRejectPrimeApplication
+  reason: `result.status` cannot be both `Approved` and `Rejected`</code></pre>
+
+<div class="theorem-env remark">
+  <span class="env-title">Remark 3.2.</span>
+  Detection is deliberately <em>over-approximate on postconditions and
+  under-approximate on preconditions</em>: it does not attempt to prove that the two
+  rules' <code>requires</code> sets can be satisfied simultaneously. Mutually
+  exclusive preconditions therefore may produce a candidate that is not a true logical
+  conflict. Every candidate is a prompt for human (or, eventually, Lean) review—never
+  a verdict. See §<a href="#limitations">7</a>.
+</div>
+
+<h2 id="testgen"><span class="secnum">4</span> Test-Suite Generation</h2>
+
+<p>
+  For each contract, <em>tauto</em> emits a structured (JSON) test suite with two
+  families of cases.
+</p>
+
+<ol>
+  <li>
+    <strong>Happy path.</strong> One case in which every precondition is satisfied;
+    the expected result asserts each <code>ensures</code> postcondition, that no
+    <code>forbidden</code> operation is called, and that every <code>preserves</code>
+    field is unchanged.
+  </li>
+  <li>
+    <strong>Precondition violations.</strong> For each condition <span>c ∈ R</span>,
+    one case that satisfies every precondition <em>except</em> <span>c</span>; the
+    operation must be rejected.
+  </li>
+</ol>
+
+<p>
+  Boundary values are chosen to probe the exact edge of each comparison:
+</p>
+
+<table>
+  <thead><tr><th>Condition</th><th>Passing value</th><th>Failing value</th></tr></thead>
+  <tbody>
+    <tr><td><code>x &gt;= N</code></td><td><code>N</code> (exact boundary)</td><td><code>N − 1</code></td></tr>
+    <tr><td><code>x &lt;= N</code></td><td><code>N</code> (exact boundary)</td><td><code>N + 1</code></td></tr>
+    <tr><td><code>x &gt; N</code></td><td><code>N + 1</code></td><td><code>N</code></td></tr>
+    <tr><td><code>x == v</code> (int/bool)</td><td><code>v</code></td><td>next int / opposite bool</td></tr>
+    <tr><td><code>x == E</code> (enum)</td><td><code>E</code></td><td><em>symbolic</em>: “any value ≠ E”</td></tr>
+  </tbody>
+</table>
+
+<div class="theorem-env remark">
+  <span class="env-title">Remark 4.1 (No fabricated domains).</span>
+  For enum equalities the failing case is emitted <em>symbolically</em>
+  (<code>&lt;any value ≠ UnderReview&gt;</code>) rather than by inventing a concrete
+  enum member the specification never declared. A parameterized hole is safer than a
+  wrong constant.
+</div>
+
+<h2 id="lean"><span class="secnum">5</span> The Lean Backend</h2>
+
+<p>
+  <em>tauto</em> translates each contract into a Lean&nbsp;4 theorem whose statement
+  encodes “preconditions imply postconditions,” and assembles them into a
+  <code>lake</code> project. Running <code>lake build</code> confirms that the
+  generated statements are <em>well-typed</em>.
+</p>
+
+<div class="theorem-env limitation">
+  <span class="env-title">Caveat 5.1 (Stubs, not proofs).</span>
+  The body of every generated theorem is <code>sorry</code>. A successful build
+  therefore establishes that the formal <em>structure</em> compiles—it does
+  <strong>not</strong> establish that any rule is correct or that the rule set is
+  consistent. The Lean workspace is scaffolding for future mechanized proof, and the
+  interface labels it as such (“proof obligations, sorry-stubbed”).
+</div>
+
+<h2 id="usage"><span class="secnum">6</span> Using tauto</h2>
+
+<h3><span class="secnum">6.1</span> Quickstart</h3>
+
+<p>Write rules in a Markdown file, then serve the workspace:</p>
+
+<pre><code># put contracts in ./rules/*.md, then:
+tauto serve ./rules --port 4000
+# open http://localhost:4000</code></pre>
+
+<h3><span class="secnum">6.2</span> Command-line interface</h3>
+
+<table class="api">
+  <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>tauto verify &lt;path&gt;</code></td><td>Parse contracts and generate the Lean workspace. <code>--lean-check</code> runs <code>lake build</code>; <code>--strict</code> fails on remaining stubs.</td></tr>
+    <tr><td><code>tauto list &lt;path&gt;</code></td><td>List parsed contracts (entity / operation / case).</td></tr>
+    <tr><td><code>tauto hash &lt;path&gt;</code></td><td>Print semantic and provenance hashes (CI cache keys).</td></tr>
+    <tr><td><code>tauto diff &lt;base&gt; &lt;new&gt;</code></td><td>Structural diff plus conflict candidates; <code>--strict</code> fails on non-expansion changes.</td></tr>
+    <tr><td><code>tauto store &lt;path&gt; --project &lt;slug&gt;</code></td><td>Store contracts under a project slug.</td></tr>
+    <tr><td><code>tauto retrieve --project &lt;slug&gt;</code></td><td>Retrieve stored contracts for a project.</td></tr>
+    <tr><td><code>tauto serve &lt;path&gt;</code></td><td>Start the web interface and HTTP API.</td></tr>
+  </tbody>
+</table>
+
+<p>All commands accept <code>--format json</code> for machine consumption.</p>
+
+<h3><span class="secnum">6.3</span> HTTP API</h3>
+
+<p>
+  The server exposes a small JSON API under <code>/api/v1</code>. The endpoint of most
+  interest to an automated agent is <code>POST /check</code>, which validates a
+  <em>proposed</em> rule against the current set <strong>without persisting
+  anything</strong> and returns both a compatibility verdict and a generated test
+  suite.
+</p>
+
+<table class="api">
+  <thead><tr><th>Endpoint</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET /api/v1/contracts</code></td><td>All parsed contracts.</td></tr>
+    <tr><td><code>GET /api/v1/graph</code></td><td>Contract graph: nodes plus <code>same_op</code> and <code>conflict</code> edges.</td></tr>
+    <tr><td><code>POST /api/v1/contracts/upload</code></td><td>Persist a rule file. Returns <code>409</code> and rolls back if it introduces a conflict.</td></tr>
+    <tr><td><code>GET /api/v1/history</code></td><td>Chronological log of upload attempts and their outcomes.</td></tr>
+    <tr><td><code>GET /api/v1/proofs</code></td><td>Generate the Lean workspace and run <code>lake build</code> on demand.</td></tr>
+    <tr><td><code>POST /api/v1/check</code></td><td>Dry-run validation of a proposed rule; returns verdict + tests. Writes nothing.</td></tr>
+  </tbody>
+</table>
+
+<div class="theorem-env example">
+  <span class="env-title">Example 6.1 (Checking a proposed rule).</span>
+<pre><code># body is Markdown containing one or more contract blocks
+curl -X POST http://localhost:4000/api/v1/check \
+  -H 'Content-Type: text/plain' \
+  --data-binary @proposed-rule.md</code></pre>
+<p style="margin-top:0.6rem">Response shape:</p>
+<pre><code>{
+  "compatible": true,
+  "proposed_contracts": 1,
+  "parse_errors": 0,
+  "conflicts": [],
+  "tests": {
+    "total_cases": 11,
+    "proposed":   [ /* suites for the new rule */ ],
+    "regression": [ /* suites for existing rules */ ]
+  }
+}</code></pre>
+</div>
+
+<p>
+  When the proposal contradicts an existing rule, <code>compatible</code> is
+  <code>false</code> and <code>conflicts</code> lists each offending pair with a reason
+  (Definition&nbsp;3.1). An agent can thus gate a proposed rule on a single request and
+  receive, in the same response, the tests an implementation must satisfy.
+</p>
+
+<h3><span class="secnum">6.4</span> Web interface</h3>
+
+<p>
+  <code>tauto serve</code> also hosts a browser UI: a force-directed
+  <em>graph</em> of contracts (with conflict edges highlighted), a searchable
+  <em>list</em>, an upload <em>history</em>, a <em>proofs</em> panel that runs
+  <code>lake build</code>, and a <em>check</em> panel that mirrors
+  <code>POST /check</code>—paste a rule, see the verdict and the generated test cases.
+</p>
+
+<h2 id="limitations"><span class="secnum">7</span> Limitations</h2>
+
+<div class="theorem-env limitation">
+  <span class="env-title">On soundness.</span>
+  Conflict detection is a <em>heuristic</em>. It flags candidates from contradictory
+  postconditions and does not reason about whether the rules' preconditions can hold
+  simultaneously; it may therefore both miss genuine conflicts that manifest only
+  through richer semantics and raise candidates that are not true conflicts. It is a
+  reviewer's aid, not a decision procedure.
+</div>
+
+<div class="theorem-env limitation">
+  <span class="env-title">On the Lean workspace.</span>
+  Generated theorems are <code>sorry</code>-stubbed. A passing <code>lake build</code>
+  certifies well-formedness of the statements, not the truth of the rules. Mechanized
+  proof of the obligations is future work.
+</div>
+
+<div class="theorem-env limitation">
+  <span class="env-title">On test generation.</span>
+  Tests exercise the boundaries of each individual condition. They do not enumerate
+  combinations of violated preconditions, nor synthesize values for enum negatives
+  (these remain symbolic). Generated suites are a strong starting point, not a
+  complete conformance oracle.
+</div>
+
+<footer>
+  <p>
+    tauto — Lean-backed business-rule contracts. Source and issues on GitHub.
+    Typeset with <a href="https://latex.vercel.app/">LaTeX.css</a>.
+  </p>
+</footer>
+
+</body>
+</html>
