@@ -49,6 +49,17 @@ curl -X POST http://localhost:4000/api/v1/check \
   --data-binary @proposed-rule.md
 ```
 
+## Domain glossary
+
+Declare your domain vocabulary in ` ```glossary ` blocks (e.g. a `_glossary.md`
+in the contracts dir): each entity's canonical name, its instance-prefix aliases
+(`loan` for `Mortgage`, so `loan.credit_score` resolves), fields, enum members,
+and operations. `POST /api/v1/check` then returns advisory `glossary_warnings`
+for a proposed rule — unknown fields, undeclared enum values, or a `package.*`
+reference inside a `Mortgage` rule (the Order-vs-Package distinction). Warnings
+never block; an empty glossary is inert. `GET /api/v1/glossary` returns it, and
+the MCP `get_glossary` tool exposes it to authoring agents.
+
 ## Commands
 
 | Command | Purpose |

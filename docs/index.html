@@ -90,6 +90,7 @@
     <li><a href="#language">The Contract Language</a></li>
     <li><a href="#conflicts">Consistency and Conflict Detection</a></li>
     <li><a href="#testgen">Test-Suite Generation</a></li>
+    <li><a href="#glossary">The Domain Glossary</a></li>
     <li><a href="#lean">The Lean Backend</a></li>
     <li><a href="#usage">Using tauto</a></li>
     <li><a href="#limitations">Limitations</a></li>
@@ -244,7 +245,7 @@ assumes:
   rules' <code>requires</code> sets can be satisfied simultaneously. Mutually
   exclusive preconditions therefore may produce a candidate that is not a true logical
   conflict. Every candidate is a prompt for human (or, eventually, Lean) review—never
-  a verdict. See §<a href="#limitations">7</a>.
+  a verdict. See §<a href="#limitations">8</a>.
 </div>
 
 <h2 id="testgen"><span class="secnum">4</span> Test-Suite Generation</h2>
@@ -291,7 +292,50 @@ assumes:
   wrong constant.
 </div>
 
-<h2 id="lean"><span class="secnum">5</span> The Lean Backend</h2>
+<h2 id="glossary"><span class="secnum">5</span> The Domain Glossary</h2>
+
+<p>
+  Rules draw on a shared vocabulary: <code>Mortgage</code> has a
+  <code>credit_score</code>; a <code>Package</code> has a <code>weight_kg</code>.
+  Left implicit, this vocabulary drifts — the same concept acquires two field
+  names, or a rule for one entity silently reaches into another's terms. The
+  <em>glossary</em> makes the vocabulary explicit and checkable.
+</p>
+
+<div class="theorem-env definition">
+  <span class="env-title">Definition 5.1 (Entity definition).</span>
+  An <em>entity definition</em> is a tuple
+  <span>(name, aka, fields, operations, prose)</span> where <em>name</em> is the
+  canonical entity, <em>aka</em> the set of instance-prefix aliases used in field
+  paths (e.g. <code>loan</code> for <code>Mortgage</code>, so that
+  <code>loan.credit_score</code> resolves to a Mortgage field), <em>fields</em>
+  the declared fields (each optionally typed <code>int</code>/<code>bool</code>/
+  <code>string</code>/<code>enum(&hellip;)</code>), and <em>operations</em> the
+  permitted operations. Definitions live in ` ```glossary ` blocks, discovered by
+  the same scanner as contracts.
+</div>
+
+<p>
+  Given a glossary, <em>tauto</em> validates each contract's references and emits
+  <em>advisory</em> warnings — it never blocks. For a field path
+  <span>p.f</span> in a contract on entity <span>E</span>: if <span>p</span> is
+  <code>result</code> or an alias of <span>E</span>, then <span>f</span> must be a
+  declared field of <span>E</span>; if <span>p</span> is an alias of a
+  <em>different</em> entity <span>E&prime;</span>, the reference is flagged as
+  <em>cross-entity</em> (the <code>Order</code>-vs-<code>Package</code>
+  distinction); enum comparisons must use declared members. An empty glossary
+  yields no warnings, so the mechanism is inert until a vocabulary is declared.
+</p>
+
+<div class="theorem-env remark">
+  <span class="env-title">Remark 5.2.</span>
+  Glossary warnings are surfaced in the <code>POST /check</code> response
+  (<code>glossary_warnings[]</code>) and exposed to authoring agents through the
+  <code>get_glossary</code> MCP tool, so a rule can be reconciled with the domain
+  vocabulary <em>as it is written</em> — not audited after the fact.
+</div>
+
+<h2 id="lean"><span class="secnum">6</span> The Lean Backend</h2>
 
 <p>
   <em>tauto</em> translates each contract into a Lean&nbsp;4 theorem whose statement
@@ -309,9 +353,9 @@ assumes:
   interface labels it as such (“proof obligations, sorry-stubbed”).
 </div>
 
-<h2 id="usage"><span class="secnum">6</span> Using tauto</h2>
+<h2 id="usage"><span class="secnum">7</span> Using tauto</h2>
 
-<h3><span class="secnum">6.1</span> Quickstart</h3>
+<h3><span class="secnum">7.1</span> Quickstart</h3>
 
 <p>Write rules in a Markdown file, then serve the workspace:</p>
 
@@ -319,7 +363,7 @@ assumes:
 tauto serve ./rules --port 4000
 # open http://localhost:4000</code></pre>
 
-<h3><span class="secnum">6.2</span> Command-line interface</h3>
+<h3><span class="secnum">7.2</span> Command-line interface</h3>
 
 <table class="api">
   <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
@@ -336,7 +380,7 @@ tauto serve ./rules --port 4000
 
 <p>All commands accept <code>--format json</code> for machine consumption.</p>
 
-<h3><span class="secnum">6.3</span> HTTP API</h3>
+<h3><span class="secnum">7.3</span> HTTP API</h3>
 
 <p>
   The server exposes a small JSON API under <code>/api/v1</code>. The endpoint of most
@@ -354,7 +398,8 @@ tauto serve ./rules --port 4000
     <tr><td><code>POST /api/v1/contracts/upload</code></td><td>Persist a rule file. Returns <code>409</code> and rolls back if it introduces a conflict.</td></tr>
     <tr><td><code>GET /api/v1/history</code></td><td>Chronological log of upload attempts and their outcomes.</td></tr>
     <tr><td><code>GET /api/v1/proofs</code></td><td>Generate the Lean workspace and run <code>lake build</code> on demand.</td></tr>
-    <tr><td><code>POST /api/v1/check</code></td><td>Dry-run validation of a proposed rule; returns verdict + tests. Writes nothing.</td></tr>
+    <tr><td><code>POST /api/v1/check</code></td><td>Dry-run validation of a proposed rule; returns verdict, tests, and glossary warnings. Writes nothing.</td></tr>
+    <tr><td><code>GET /api/v1/glossary</code></td><td>The domain glossary: entities with their aliases, fields, enums, and operations.</td></tr>
   </tbody>
 </table>
 
@@ -385,7 +430,7 @@ curl -X POST http://localhost:4000/api/v1/check \
   receive, in the same response, the tests an implementation must satisfy.
 </p>
 
-<h3><span class="secnum">6.4</span> Web interface</h3>
+<h3><span class="secnum">7.4</span> Web interface</h3>
 
 <p>
   <code>tauto serve</code> also hosts a browser UI: a force-directed
@@ -395,7 +440,7 @@ curl -X POST http://localhost:4000/api/v1/check \
   <code>POST /check</code>—paste a rule, see the verdict and the generated test cases.
 </p>
 
-<h2 id="limitations"><span class="secnum">7</span> Limitations</h2>
+<h2 id="limitations"><span class="secnum">8</span> Limitations</h2>
 
 <div class="theorem-env limitation">
   <span class="env-title">On soundness.</span>

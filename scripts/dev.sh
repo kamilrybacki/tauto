@@ -9,6 +9,7 @@
 #   scripts/dev.sh build              Build the release binary and the web UI
 #   scripts/dev.sh serve              Serve examples/rules (UI at http://localhost:4000)
 #   scripts/dev.sh check <file.md>    Dry-run a proposed rule file via POST /api/v1/check
+#   scripts/dev.sh glossary           Show the domain glossary (GET /api/v1/glossary)
 #   scripts/dev.sh mcp                Run the MCP stdio server against the local serve (interactive)
 #   scripts/dev.sh mcp-call <tool> [json-args]
 #                                     One-shot MCP tool call, e.g.
@@ -72,6 +73,11 @@ cmd_check() {
         --data-binary @"$file" | pp
 }
 
+cmd_glossary() {
+    wait_for_serve
+    curl -s "$BASE/api/v1/glossary" | pp
+}
+
 cmd_mcp() {
     need_bin
     wait_for_serve
@@ -118,8 +124,12 @@ cmd_demo() {
     wait_for_serve
     echo "=== seeded rules ==="
     curl -s "$BASE/api/v1/contracts" | pp
+    echo
+    echo "=== domain glossary ==="
+    curl -s "$BASE/api/v1/glossary" | pp
     for f in "$ROOT/examples/proposed/compatible-refinance.md" \
-             "$ROOT/examples/proposed/conflicting-reject.md"; do
+             "$ROOT/examples/proposed/conflicting-reject.md" \
+             "$ROOT/examples/proposed/cross-entity-mixup.md"; do
         echo
         echo "=== check_rule: $(basename "$f") ==="
         cmd_mcp_call check_rule "$(python3 -c 'import json,sys;print(json.dumps({"contract":open(sys.argv[1]).read()}))' "$f")"
@@ -133,6 +143,7 @@ case "${1:-}" in
     build)     cmd_build ;;
     serve)     cmd_serve ;;
     check)     shift; cmd_check "$@" ;;
+    glossary)  cmd_glossary ;;
     mcp)       cmd_mcp ;;
     mcp-call)  shift; cmd_mcp_call "$@" ;;
     demo)      cmd_demo ;;

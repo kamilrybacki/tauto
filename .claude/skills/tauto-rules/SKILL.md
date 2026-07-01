@@ -19,27 +19,39 @@ rules.
 
 ## Workflow
 
-1. **Converse.** Elicit the rule until you can name, unambiguously:
+1. **Learn the vocabulary.** Call the MCP `get_glossary` tool first. It returns
+   the domain entities, each with its canonical name, `aka` instance prefixes
+   (how its fields are addressed — e.g. `loan.credit_score` for `Mortgage`),
+   declared fields and enum values, and operations. Use it to pick the *right*
+   entity and its exact field/enum/operation names, and to keep distinct
+   entities distinct (don't reach into `Package`'s fields from an `Order` rule).
+
+2. **Converse.** Elicit the rule until you can name, unambiguously:
    - the **entity** it governs (a domain object, e.g. `Mortgage`, `Order`),
    - the **operation** it constrains (e.g. `approveApplication`, `cancelOrder`),
    - the **preconditions** (what must be true to allow it),
    - the **postconditions** (what the result guarantees),
    - optionally: operations that must **not** happen, fields that must be
      **preserved**, and background **assumptions**.
-   Ask targeted questions for anything missing. Do not invent thresholds,
-   statuses, or field names the user did not give — confirm them.
+   Map the user's words onto glossary terms. If they describe a field, status,
+   or operation the glossary does not have, say so and confirm — it may be a new
+   term to add to the glossary, or a different existing term they mean. Do not
+   invent thresholds, statuses, or field names the user did not give.
 
-2. **Translate** to the DSL (grammar below). Show the user the contract block
-   you produced and let them correct it before checking.
+3. **Translate** to the DSL (grammar below), using the canonical entity name,
+   its `aka` prefix for field paths, and declared enum members. Show the user
+   the contract block you produced and let them correct it before checking.
 
-3. **Check** by calling the MCP `check_rule` tool with the contract markdown as
+4. **Check** by calling the MCP `check_rule` tool with the contract markdown as
    the `contract` argument (see "Calling the check").
 
-4. **Interpret** the result for the user (see "Reading the result"). If the rule
-   conflicts, explain the contradiction and offer options (amend the new rule,
-   or revisit the existing one). If the DSL failed to parse, fix it and retry.
+5. **Interpret** the result for the user (see "Reading the result"). Report any
+   `glossary_warnings` — an unknown field, a cross-entity reference, an
+   undeclared enum value — and reconcile them: fix a typo, use the right entity,
+   or agree the term is genuinely new. If the rule conflicts, explain the
+   contradiction and offer options. If the DSL failed to parse, fix it and retry.
 
-5. **Iterate** until the user is satisfied. Saving the rule is a separate,
+6. **Iterate** until the user is satisfied. Saving the rule is a separate,
    explicit step (uploading the file) — never do it as a side effect of checking.
 
 ## The tauto DSL
@@ -119,6 +131,12 @@ If the tauto MCP server is not connected, it is provided by this repo:
   cannot be both `Approved` and `Rejected`"*).
 - `proposed_contracts`, `parse_errors` — how many contracts parsed from your
   submission and how many parse problems were found.
+- `glossary_warnings[]` — advisory vocabulary findings, each `{ contract,
+  category, message }`. Categories: `unknown_entity`, `unknown_operation`,
+  `unknown_field`, `cross_entity_reference` (a field path reaching into another
+  entity's vocabulary — e.g. `package.*` in a `Mortgage` rule),
+  `unknown_prefix`, `unknown_enum_value`. These never block; they signal the
+  rule drifted from the domain vocabulary. Reconcile each one.
 - `tests` — a generated suite: `proposed[]` (cases for the new rule) and a
   `regression_suites` count (existing rules re-tested). Each case has an `id`,
   a `kind` (`happy_path` or `precondition_violation`), and `should_pass`.
