@@ -13,8 +13,9 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use crate::contract_ir::{find_conflict_candidates, ContractIR, ContractSet};
 use crate::contract_parser::{extract_contract_blocks, parse_contract_block};
+use crate::glossary::{self, Glossary, GlossaryWarning};
 use crate::lean_gen::{generate_lean_workspace, run_lake_build, write_lean_workspace};
-use crate::scanner::scan_path;
+use crate::scanner::{scan_glossary, scan_path};
 use crate::test_gen;
 
 struct ServerState {
@@ -505,6 +506,9 @@ struct CheckResponse {
     proposed_contracts: usize,
     parse_errors: usize,
     conflicts: Vec<ConflictInfo>,
+    /// Advisory glossary findings for the proposed rule (unknown entity/field,
+    /// cross-entity references, etc.). Never blocks — informational only.
+    glossary_warnings: Vec<GlossaryWarning>,
     tests: CheckTests,
 }
 
@@ -570,6 +574,11 @@ fn compute_check(
     let (existing_raw, _, _) = scan_path(contracts_path).map_err(api_err)?;
     let existing_cs = ContractSet::new(dedup_contracts(&existing_raw));
 
+    // Validate the proposed rule's vocabulary against the domain glossary
+    // (advisory — unknown entities/fields, cross-entity references, etc.).
+    let glossary = scan_glossary(contracts_path).map_err(api_err)?;
+    let glossary_warnings = glossary::validate(&proposed_cs, &glossary);
+
     // Conflicts already present in the existing set are the baseline; we only
     // report conflicts the proposal *introduces*, so a rule that reuses an
     // existing key does not resurface pre-existing conflicts as if it caused them.
@@ -608,8 +617,20 @@ fn compute_check(
         proposed_contracts: proposed_cs.contracts.len(),
         parse_errors,
         conflicts,
+        glossary_warnings,
         tests: CheckTests { total_cases, proposed: proposed_suites, regression: regression_suites },
     })
+}
+
+// ── /api/v1/glossary ──────────────────────────────────────────────────────────
+
+async fn handle_glossary(State(state): State<Arc<ServerState>>) -> ApiResult<Glossary> {
+    let path = state.contracts_path.clone();
+    tokio::task::spawn_blocking(move || scan_glossary(&path))
+        .await
+        .map_err(api_err)?
+        .map(Json)
+        .map_err(api_err)
 }
 
 // ── entry point ───────────────────────────────────────────────────────────────
@@ -648,6 +669,7 @@ async fn serve_inner(
         .route("/api/v1/history", get(handle_history))
         .route("/api/v1/proofs", get(handle_proofs))
         .route("/api/v1/check", post(handle_check))
+        .route("/api/v1/glossary", get(handle_glossary))
         .with_state(state)
         .fallback_service(serve_dir);
 

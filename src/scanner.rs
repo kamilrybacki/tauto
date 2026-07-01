@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::contract_ir::ContractSet;
 use crate::contract_parser::{extract_contract_blocks, parse_contract_block};
+use crate::glossary::{parse_glossary_doc, Glossary};
 
 /// Recursively scan `path` for markdown files, parse all contract blocks, and
 /// return `(contract_set, parse_error_count, file_count)`.
@@ -26,6 +27,25 @@ pub fn scan_path(path: &std::path::Path) -> std::io::Result<(ContractSet, usize,
         }
     }
     Ok((ContractSet::new(contracts), parse_errors, file_count))
+}
+
+/// Scan `path` for ```glossary blocks across all markdown files and assemble a
+/// combined `Glossary`. Later definitions of the same entity name win (a simple
+/// last-write merge), so a `_glossary.md` can override entities defined inline.
+pub fn scan_glossary(path: &std::path::Path) -> std::io::Result<Glossary> {
+    let files = collect_markdown_files(path)?;
+    let mut entities: Vec<crate::glossary::EntityDef> = Vec::new();
+    for file_path in &files {
+        let content = match std::fs::read_to_string(file_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        for entity in parse_glossary_doc(&content) {
+            entities.retain(|e| e.name != entity.name);
+            entities.push(entity);
+        }
+    }
+    Ok(Glossary::new(entities))
 }
 
 pub fn collect_markdown_files(path: &std::path::Path) -> std::io::Result<Vec<PathBuf>> {

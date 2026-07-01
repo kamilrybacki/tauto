@@ -1,5 +1,6 @@
 pub mod contract_ir;
 pub mod contract_parser;
+pub mod glossary;
 pub mod lean_gen;
 pub mod preprocessing;
 pub mod project_store;

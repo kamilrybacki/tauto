@@ -143,8 +143,10 @@ Contracts are keyed by entity/operation/case. Use list_contracts and \
 search_contracts to find them, find_conflicts and graph_neighbors to explore \
 relations, and verify_contract for a static safety summary. To validate a NEW \
 proposed rule before it is saved, use check_rule: it dry-runs the rule against \
-the current set (writing nothing) and returns a compatibility verdict plus a \
-generated test suite.",
+the current set (writing nothing) and returns a compatibility verdict, a \
+generated test suite, and advisory glossary warnings. Call get_glossary first \
+to learn the domain vocabulary (entities, their field prefixes, enums, \
+operations) so a rule stays consistent.",
     })
 }
 
@@ -222,6 +224,12 @@ fn tool_definitions() -> Value {
                 },
                 "required": ["contract"]
             }
+        },
+        {
+            "name": "get_glossary",
+            "title": "Get the domain glossary",
+            "description": "Return the domain vocabulary: each entity's canonical name, `aka` instance prefixes (how its fields are addressed in rules, e.g. `loan.credit_score` for Mortgage), declared fields and enum values, operations, and prose. Consult this BEFORE translating a rule so you use the right entity and don't confuse one entity's terms (e.g. Order) with another's (e.g. Package).",
+            "inputSchema": { "type": "object", "properties": {} }
         }
     ])
 }
@@ -240,6 +248,7 @@ fn handle_tool_call(ctx: &Ctx, id: Value, req: &Value) -> Value {
         "graph_neighbors" => tool_graph_neighbors(ctx, &args),
         "verify_contract" => tool_verify_contract(ctx, &args),
         "check_rule" => tool_check_rule(ctx, &args),
+        "get_glossary" => tool_get_glossary(ctx, &args),
         other => Err(format!("unknown tool: {other}")),
     };
 
@@ -484,14 +493,29 @@ fn tool_check_rule(ctx: &Ctx, args: &Value) -> Result<String, String> {
         "proposed_contracts": body.get("proposed_contracts"),
         "parse_errors": body.get("parse_errors"),
         "conflicts": body.get("conflicts"),
+        "glossary_warnings": body.get("glossary_warnings"),
         "tests": {
             "total_cases": tests.get("total_cases"),
             "proposed": summarize(tests.get("proposed").unwrap_or(&json!([]))),
             "regression_suites": tests.get("regression").and_then(Value::as_array).map(|a| a.len()).unwrap_or(0),
         },
-        "note": "Conflicts are heuristic candidates; a Lean proof confirms them. Nothing was saved — this was a dry run.",
+        "note": "Conflicts are heuristic candidates; a Lean proof confirms them. glossary_warnings are advisory vocabulary checks. Nothing was saved — this was a dry run.",
     });
     Ok(pretty(&out))
+}
+
+fn tool_get_glossary(ctx: &Ctx, _args: &Value) -> Result<String, String> {
+    let glossary = ctx.get_json("/api/v1/glossary")?;
+    let entities = glossary
+        .get("entities")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    Ok(pretty(&json!({
+        "count": entities.len(),
+        "entities": entities,
+        "note": "The domain vocabulary. Use the canonical entity names, their `aka` instance prefixes (how fields are addressed, e.g. loan.credit_score), declared fields/enums, and operations when authoring a rule so it stays consistent with this domain.",
+    })))
 }
 
 // ── JSON-RPC envelope helpers ──────────────────────────────────────────────────
