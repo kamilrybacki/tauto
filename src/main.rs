@@ -13,7 +13,7 @@ use tauto::lean_gen::{
 };
 use tauto::project_store::{load_document, save_document, ContractDocument};
 use tauto::scanner::collect_markdown_files;
-use tauto::server::run_serve;
+use tauto::server::{run_mcp, run_serve};
 use tauto::slm::{ArtifactKind, CodeGenerationRequest, DeepSeekProvider, SlmCodeGenerator};
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
@@ -117,6 +117,13 @@ enum Commands {
         #[arg(long, default_value = "ui/dist")]
         ui_dist: PathBuf,
     },
+    /// Run a Model Context Protocol (MCP) stdio server backed by `tauto serve`
+    Mcp {
+        /// Base URL of a running `tauto serve` instance (falls back to
+        /// TAUTO_API_URL, then http://localhost:4000)
+        #[arg(long)]
+        api_url: Option<String>,
+    },
 }
 
 fn main() {
@@ -146,6 +153,12 @@ fn main() {
         }
         Commands::Serve { path, port, ui_dist } => {
             run_serve(path, port, ui_dist).map_err(|e| e.to_string().into())
+        }
+        Commands::Mcp { api_url } => {
+            let url = api_url
+                .or_else(|| std::env::var("TAUTO_API_URL").ok())
+                .unwrap_or_else(|| "http://localhost:4000".to_owned());
+            run_mcp(url).map_err(|e| e.to_string().into())
         }
     };
     if let Err(e) = result {
