@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Multipart, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Serialize;
 use tower_http::services::{ServeDir, ServeFile};
@@ -218,6 +218,64 @@ async fn handle_graph(State(state): State<Arc<ServerState>>) -> ApiResult<GraphR
     Ok(Json(build_graph(&cs)))
 }
 
+// ── POST /api/v1/contracts/upload ─────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct UploadResponse {
+    filename: String,
+    contracts: usize,
+    parse_errors: usize,
+}
+
+fn sanitize_filename(raw: &str) -> Option<String> {
+    // Strip any path components, keep only the final segment.
+    let name = std::path::Path::new(raw)
+        .file_name()
+        .and_then(|n| n.to_str())?
+        .to_owned();
+    // Enforce .md extension and restrict chars to [a-zA-Z0-9._-].
+    if !name.ends_with(".md") {
+        return None;
+    }
+    if name.chars().all(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-')) {
+        Some(name)
+    } else {
+        None
+    }
+}
+
+async fn handle_upload(
+    State(state): State<Arc<ServerState>>,
+    mut multipart: Multipart,
+) -> ApiResult<UploadResponse> {
+    while let Some(field) = multipart.next_field().await.map_err(|e| api_err(e))? {
+        if field.name() != Some("file") {
+            continue;
+        }
+        let raw_name = field
+            .file_name()
+            .unwrap_or("upload.md")
+            .to_owned();
+        let filename = sanitize_filename(&raw_name)
+            .ok_or_else(|| api_err("Filename must be *.md with only alphanumeric, dash, dot, or underscore characters"))?;
+
+        let bytes = field.bytes().await.map_err(|e| api_err(e))?;
+        let content = std::str::from_utf8(&bytes)
+            .map_err(|_| api_err("File must be valid UTF-8"))?;
+
+        let dest = state.contracts_path.join(&filename);
+        std::fs::write(&dest, content).map_err(api_err)?;
+
+        let (cs, parse_errors, _) = scan_path(&dest).map_err(api_err)?;
+        return Ok(Json(UploadResponse {
+            filename,
+            contracts: cs.contracts.len(),
+            parse_errors,
+        }));
+    }
+    Err(api_err("No field named 'file' found in the multipart body"))
+}
+
 // ── entry point ───────────────────────────────────────────────────────────────
 
 pub fn run_serve(
@@ -245,6 +303,7 @@ async fn serve_inner(
     // Adding permissive CORS would allow any website to exfiltrate local contracts.
     let app = Router::new()
         .route("/api/v1/contracts", get(handle_contracts))
+        .route("/api/v1/contracts/upload", post(handle_upload))
         .route("/api/v1/graph", get(handle_graph))
         .with_state(state)
         .fallback_service(serve_dir);
