@@ -47,7 +47,11 @@
     .subtitle { text-align: center; font-style: italic; color: #444; margin-top: -0.5rem; }
     footer { margin-top: 4rem; padding-top: 1rem; border-top: 1px solid #ddd; font-size: 0.85rem; color: #666; }
     h2 .secnum, h3 .secnum { margin-right: 0.5rem; }
-    .keyword { color: #005; font-weight: bold; }
+    .grammar:focus-visible { outline: 2px solid #005; outline-offset: 2px; }
+    @media (max-width: 640px) {
+      /* let wide command tables scroll instead of overflowing the page */
+      table.api { display: block; overflow-x: auto; }
+    }
   </style>
 </head>
 <body>
@@ -135,7 +139,7 @@
 
 <p>A condition compares a field path against a typed literal:</p>
 
-<div class="grammar">
+<div class="grammar" tabindex="0" role="region" aria-label="Contract grammar">
 contract   ::= "case" IDENT NEWLINE section*
 section    ::= label ":" NEWLINE ( INDENT item )*
 label      ::= "entity" | "operation" | "requires" | "ensures"

@@ -43,13 +43,13 @@ function CaseCard({ tc }: { tc: TestCase }) {
 
   return (
     <div className={`check-case ${isHappy ? 'check-case--happy' : 'check-case--violation'}`}>
-      <button className="check-case-header" onClick={() => setOpen(o => !o)}>
+      <button className="check-case-header" onClick={() => setOpen(o => !o)} aria-expanded={open}>
         <span className={`check-pass-badge ${tc.should_pass ? 'check-pass-badge--pass' : 'check-pass-badge--fail'}`}>
           {tc.should_pass ? 'PASS' : 'FAIL'}
         </span>
         <span className="check-case-id">{tc.id}</span>
         <span className="check-case-desc">{tc.description}</span>
-        <span className="check-chevron">{open ? '▾' : '▸'}</span>
+        <span className="check-chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>
       </button>
 
       {open && (
@@ -103,11 +103,11 @@ function SuiteSection({ suite, label }: { suite: ContractTestSuite; label?: stri
   const [open, setOpen] = useState(true);
   return (
     <div className="check-suite">
-      <button className="check-suite-header" onClick={() => setOpen(o => !o)}>
+      <button className="check-suite-header" onClick={() => setOpen(o => !o)} aria-expanded={open}>
         {label && <span className="check-suite-label-tag">{label}</span>}
         <span className="check-suite-key">{suite.contract}</span>
         <span className="check-suite-count">{suite.cases.length} cases</span>
-        <span className="check-chevron">{open ? '▾' : '▸'}</span>
+        <span className="check-chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>
       </button>
       {open && (
         <div className="check-suite-cases">
@@ -133,8 +133,9 @@ export default function CheckPanel() {
   return (
     <div className="check-panel">
       <div className="check-editor-pane">
-        <div className="check-editor-label">Paste proposed contract rule</div>
+        <label className="check-editor-label" htmlFor="check-rule-input">Paste proposed contract rule</label>
         <textarea
+          id="check-rule-input"
           className="check-textarea"
           value={content}
           onChange={e => setContent(e.target.value)}

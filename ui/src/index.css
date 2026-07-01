@@ -309,9 +309,30 @@ body {
   line-height: 1.5;
 }
 
-.check-textarea:focus {
-  outline: none;
+.check-textarea:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
   border-color: #4b5563;
+}
+
+/* Keyboard focus indicator for the hand-rolled collapsible headers on the
+   dark surface (stronger than the UA default ring). */
+.check-case-header:focus-visible,
+.check-suite-header:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+
+/* Stack the split-pane vertically on narrow viewports so the result pane is
+   not crushed to zero width. */
+@media (max-width: 640px) {
+  .check-panel { flex-direction: column; }
+  .check-editor-pane {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid #1f2937;
+    max-height: 45%;
+  }
 }
 
 .check-run-btn {
