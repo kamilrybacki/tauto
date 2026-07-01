@@ -5,8 +5,9 @@
 //! cellarette. It does not read contract files directly: the MCP pod runs in
 //! the `mcp-servers` namespace and cannot mount tauto's contracts PVC (which
 //! lives in the `tauto` namespace). Instead every tool composes the existing
-//! `tauto serve` HTTP API (`/api/v1/contracts`, `/api/v1/graph`) over the
-//! cluster network, configured via `TAUTO_API_URL`.
+//! `tauto serve` HTTP API (`/api/v1/contracts`, `/api/v1/graph`, and
+//! `/api/v1/check` for dry-run rule validation) over the cluster network,
+//! configured via `TAUTO_API_URL`.
 
 use std::io::{self, BufRead, Write};
 use std::time::Duration;

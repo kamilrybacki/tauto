@@ -70,6 +70,33 @@ cargo build --release                 # the tauto binary
 (cd ui && npm ci && npm run build)    # the web UI (served by `tauto serve`)
 ```
 
+## Local testing
+
+`scripts/dev.sh` runs the whole stack locally — no cluster needed. It serves the
+example rules in `examples/rules/` and exercises the HTTP API and the MCP
+`check_rule` flow.
+
+```bash
+scripts/dev.sh build            # build binary + UI
+scripts/dev.sh serve            # serve examples/rules — UI at http://localhost:4000
+# in another terminal:
+scripts/dev.sh check examples/proposed/compatible-refinance.md   # dry-run a proposed rule
+scripts/dev.sh mcp-call list_contracts                           # one-shot MCP tool call
+scripts/dev.sh demo             # compatible + conflicting + malformed proposals end-to-end
+```
+
+`examples/proposed/` holds sample rules to check (a compatible one and one that
+conflicts with the seeded set). `TAUTO_SKIP_LEAN_CHECK=1` is set automatically so
+no Lean toolchain is required.
+
+### The MCP server and the rule-authoring skill
+
+`tauto mcp --api-url <serve URL>` is a stdio JSON-RPC MCP server exposing the
+contracts to LLMs (`list_contracts`, `search_contracts`, `find_conflicts`,
+`graph_neighbors`, `verify_contract`, and `check_rule` for dry-run validation of
+a proposed rule). The `.claude/skills/tauto-rules/` skill drives the full loop:
+converse about a new rule, translate it to the DSL, and check it via `check_rule`.
+
 ## Limitations
 
 Conflict detection is a **heuristic** that surfaces candidates for review, not a
