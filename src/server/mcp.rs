@@ -37,6 +37,26 @@ impl Ctx {
             .map_err(|e| format!("invalid JSON from {url}: {e}"))
     }
 
+    /// POST a raw text body to `{api_url}{path}` and parse the JSON response,
+    /// returning both the status and the (possibly error) body. The check
+    /// endpoint returns JSON on both 200 (verdict) and 422 (unparseable), so
+    /// callers inspect the status rather than treating non-2xx as opaque.
+    fn post_text(&self, path: &str, body: &str) -> Result<(reqwest::StatusCode, Value), String> {
+        let url = format!("{}{}", self.api_url.trim_end_matches('/'), path);
+        let resp = self
+            .client
+            .post(&url)
+            .header("Content-Type", "text/plain")
+            .body(body.to_owned())
+            .send()
+            .map_err(|e| format!("request to {url} failed: {e}"))?;
+        let status = resp.status();
+        let value = resp
+            .json::<Value>()
+            .map_err(|e| format!("invalid JSON from {url}: {e}"))?;
+        Ok((status, value))
+    }
+
     fn contracts(&self) -> Result<Vec<Value>, String> {
         let body = self.get_json("/api/v1/contracts")?;
         Ok(body
@@ -120,7 +140,10 @@ fn initialize_result(req: &Value) -> Value {
         "instructions": "Browse business-logic contracts as a theorem graph. \
 Contracts are keyed by entity/operation/case. Use list_contracts and \
 search_contracts to find them, find_conflicts and graph_neighbors to explore \
-relations, and verify_contract for a static safety summary.",
+relations, and verify_contract for a static safety summary. To validate a NEW \
+proposed rule before it is saved, use check_rule: it dry-runs the rule against \
+the current set (writing nothing) and returns a compatibility verdict plus a \
+generated test suite.",
     })
 }
 
@@ -186,6 +209,18 @@ fn tool_definitions() -> Value {
                 },
                 "required": ["key"]
             }
+        },
+        {
+            "name": "check_rule",
+            "title": "Check a proposed rule",
+            "description": "Dry-run a NEW proposed contract against the current rule set WITHOUT saving it. Returns a compatibility verdict, any conflicts the rule would introduce, and a generated JSON test suite. The `contract` argument is the rule in tauto DSL: one or more ```contract fenced blocks with case/entity/operation and requires/ensures/forbidden/preserves/assumes sections. A body with no parseable contract is rejected (isError) so you can correct the DSL and retry.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "contract": { "type": "string", "description": "The proposed rule as markdown containing one or more ```contract blocks in tauto DSL." }
+                },
+                "required": ["contract"]
+            }
         }
     ])
 }
@@ -203,6 +238,7 @@ fn handle_tool_call(ctx: &Ctx, id: Value, req: &Value) -> Value {
         "find_conflicts" => tool_find_conflicts(ctx, &args),
         "graph_neighbors" => tool_graph_neighbors(ctx, &args),
         "verify_contract" => tool_verify_contract(ctx, &args),
+        "check_rule" => tool_check_rule(ctx, &args),
         other => Err(format!("unknown tool: {other}")),
     };
 
@@ -386,6 +422,75 @@ fn tool_verify_contract(ctx: &Ctx, args: &Value) -> Result<String, String> {
         "static_status": static_status,
         "lean_proof": "not evaluated in this environment (no Lean toolchain); run `tauto verify --lean-check` for a real proof",
     })))
+}
+
+fn tool_check_rule(ctx: &Ctx, args: &Value) -> Result<String, String> {
+    let contract = args
+        .get("contract")
+        .and_then(Value::as_str)
+        .ok_or("missing required argument: contract")?;
+
+    let (status, body) = ctx.post_text("/api/v1/check", contract)?;
+
+    // 422: the server understood no contract in the submission. Surface as a
+    // tool error (isError) with the server's detail so the caller fixes the DSL.
+    if status.as_u16() == 422 {
+        let msg = body
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("no parseable contract block found");
+        return Err(format!(
+            "{msg} (parse_errors={}, blocks_seen={}). Check the ```contract fencing and the case/entity/operation sections, then retry.",
+            body.get("parse_errors").and_then(Value::as_u64).unwrap_or(0),
+            body.get("blocks_seen").and_then(Value::as_u64).unwrap_or(0),
+        ));
+    }
+    if !status.is_success() {
+        return Err(format!("check_rule failed: HTTP {status}: {}", pretty(&body)));
+    }
+
+    // Summarize: keep the verdict and conflicts verbatim (small), but compact the
+    // test suites to case indices so the result stays bounded regardless of size.
+    let summarize = |suites: &Value| -> Value {
+        let arr = suites.as_array().cloned().unwrap_or_default();
+        Value::Array(
+            arr.iter()
+                .map(|s| {
+                    let cases: Vec<Value> = s
+                        .get("cases")
+                        .and_then(Value::as_array)
+                        .map(|cs| {
+                            cs.iter()
+                                .map(|c| {
+                                    json!({
+                                        "id": c.get("id"),
+                                        "kind": c.get("kind"),
+                                        "should_pass": c.get("should_pass"),
+                                    })
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    json!({ "contract": s.get("contract"), "cases": cases })
+                })
+                .collect(),
+        )
+    };
+
+    let tests = body.get("tests").cloned().unwrap_or(json!({}));
+    let out = json!({
+        "compatible": body.get("compatible"),
+        "proposed_contracts": body.get("proposed_contracts"),
+        "parse_errors": body.get("parse_errors"),
+        "conflicts": body.get("conflicts"),
+        "tests": {
+            "total_cases": tests.get("total_cases"),
+            "proposed": summarize(tests.get("proposed").unwrap_or(&json!([]))),
+            "regression_suites": tests.get("regression").and_then(Value::as_array).map(|a| a.len()).unwrap_or(0),
+        },
+        "note": "Conflicts are heuristic candidates; a Lean proof confirms them. Nothing was saved — this was a dry run.",
+    });
+    Ok(pretty(&out))
 }
 
 // ── JSON-RPC envelope helpers ──────────────────────────────────────────────────
