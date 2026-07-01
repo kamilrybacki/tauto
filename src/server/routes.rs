@@ -653,6 +653,24 @@ async fn handle_lifecycle(State(state): State<Arc<ServerState>>) -> ApiResult<Ve
 
 // ── /api/v1/reconcile ─────────────────────────────────────────────────────────
 
+/// Read observed states from the `_observed_states.json` descriptor in `dir`, or
+/// fall back to no observation. A malformed descriptor degrades to "none" rather
+/// than erroring the request.
+fn file_or_none(dir: &Path) -> (ObservedDomains, &'static str) {
+    let file = FileStateSource::new(dir.join("_observed_states.json"));
+    if file.exists() {
+        match file.observed_domains() {
+            Ok(o) => (o, "file"),
+            Err(e) => {
+                eprintln!("[reconcile:file] {e}");
+                (ObservedDomains::new(), "none")
+            }
+        }
+    } else {
+        (ObservedDomains::new(), "none")
+    }
+}
+
 /// Reconcile the glossary's declared state domains against observed ones.
 /// Source precedence: a live database (when configured) → a `_observed_states.json`
 /// descriptor in the contracts dir → none. Advisory: proposes completions, never
@@ -662,22 +680,16 @@ async fn handle_reconcile(State(state): State<Arc<ServerState>>) -> ApiResult<Re
     tokio::task::spawn_blocking(move || {
         let glossary = scan_glossary(&path)?;
 
-        // Source precedence. The live-database StateSource slots in here as the
-        // first branch when DATABASE_URL is configured; until then we fall back
-        // to the file descriptor, then to no observation.
-        let file = FileStateSource::new(path.join("_observed_states.json"));
-        let (observed, source) = if file.exists() {
-            match file.observed_domains() {
-                Ok(o) => (o, "file"),
-                // A malformed descriptor should not 500 the endpoint; report it
-                // as "none" (the glossary stands, no observations applied).
-                Err(e) => {
-                    eprintln!("[reconcile] {e}");
-                    (ObservedDomains::new(), "none")
-                }
+        // Source precedence: live database (when the `database` feature is built
+        // and DATABASE_URL is set) → file descriptor → none. A configured source
+        // that errors falls through to the next rather than failing the request.
+        let (observed, source) = match glossary::db_source::observed_from_database(&glossary) {
+            Some(Ok(o)) => (o, "database"),
+            Some(Err(e)) => {
+                eprintln!("[reconcile:db] {e}");
+                file_or_none(&path)
             }
-        } else {
-            (ObservedDomains::new(), "none")
+            None => file_or_none(&path),
         };
 
         Ok::<_, std::io::Error>(glossary::reconcile(&glossary, &observed, source))

@@ -146,8 +146,10 @@ proposed rule before it is saved, use check_rule: it dry-runs the rule against \
 the current set (writing nothing) and returns a compatibility verdict, a \
 generated test suite, and advisory glossary warnings. Call get_glossary first \
 to learn the domain vocabulary (entities, their field prefixes, enums, \
-operations) so a rule stays consistent, and state_coverage to see each \
-entity's lifecycle (states, transitions, and unhandled/isolated states).",
+operations) so a rule stays consistent, state_coverage to see each entity's \
+lifecycle (states, transitions, and unhandled/isolated states), and \
+reconcile_states to compare declared states against those observed in real \
+data (suggested completions).",
     })
 }
 

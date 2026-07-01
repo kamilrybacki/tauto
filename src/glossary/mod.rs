@@ -1,3 +1,4 @@
+pub mod db_source;
 pub mod lifecycle;
 pub mod models;
 pub mod parser;

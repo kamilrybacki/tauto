@@ -26,6 +26,9 @@ jobs:
       - name: Run unit tests
         run: cargo test --lib
 
+      - name: Compile the optional database feature
+        run: cargo build --lib --features database
+
   build:
     name: Build release binary
     runs-on: ubuntu-latest
