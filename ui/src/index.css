@@ -41,12 +41,12 @@ body {
 
 .header .subtitle {
   font-weight: 400;
-  color: #6b7280;
+  color: #8b93a1;
 }
 
 .header .stats {
   font-size: 12px;
-  color: #6b7280;
+  color: #8b93a1;
   margin-left: auto;
 }
 
@@ -162,7 +162,7 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #6b7280;
+  color: #8b93a1;
   font-size: 13px;
 }
 
@@ -206,13 +206,13 @@ body {
 
 .history-time {
   font-size: 11px;
-  color: #4b5563;
+  color: #7b8494;
   white-space: nowrap;
 }
 
 .history-meta {
   font-size: 11px;
-  color: #6b7280;
+  color: #8b93a1;
 }
 
 .history-parse-errors {
@@ -267,7 +267,7 @@ body {
 
 .history-conflict-reason {
   font-size: 11px;
-  color: #6b7280;
+  color: #8b93a1;
 }
 
 /* ── check panel ─────────────────────────────────────────────────────────────── */
@@ -290,7 +290,7 @@ body {
 
 .check-editor-label {
   font-size: 11px;
-  color: #6b7280;
+  color: #8b93a1;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -323,9 +323,21 @@ body {
   outline-offset: -2px;
 }
 
-/* Stack the split-pane vertically on narrow viewports so the result pane is
-   not crushed to zero width. */
+/* Narrow-viewport layout. The graph view stays a pan/zoom canvas; the header,
+   nav, and content panels reflow so the app is usable on small screens. */
 @media (max-width: 640px) {
+  .header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .header .stats {
+    margin-left: 0;
+    order: 3;
+    flex-basis: 100%;
+  }
+  .nav {
+    flex-wrap: wrap;
+  }
   .check-panel { flex-direction: column; }
   .check-editor-pane {
     width: 100%;
@@ -370,7 +382,7 @@ body {
   justify-content: center;
   height: 100%;
   font-size: 13px;
-  color: #6b7280;
+  color: #8b93a1;
   text-align: center;
 }
 
@@ -413,7 +425,7 @@ body {
 
 .check-summary-stat {
   font-size: 12px;
-  color: #6b7280;
+  color: #8b93a1;
 }
 
 .check-summary-warn {
@@ -456,7 +468,7 @@ body {
 
 .check-conflict-reason {
   font-size: 11px;
-  color: #6b7280;
+  color: #8b93a1;
 }
 
 .check-tests-section { margin-top: 4px; }
@@ -465,7 +477,7 @@ body {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  color: #4b5563;
+  color: #7b8494;
   letter-spacing: 0.05em;
   margin-bottom: 6px;
 }
@@ -516,7 +528,7 @@ body {
 
 .check-suite-count {
   font-size: 11px;
-  color: #4b5563;
+  color: #7b8494;
   flex-shrink: 0;
 }
 
@@ -577,7 +589,7 @@ body {
 
 .check-case-desc {
   font-size: 11px;
-  color: #6b7280;
+  color: #8b93a1;
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -587,7 +599,7 @@ body {
 
 .check-chevron {
   font-size: 11px;
-  color: #4b5563;
+  color: #7b8494;
   flex-shrink: 0;
 }
 
@@ -603,7 +615,7 @@ body {
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
-  color: #4b5563;
+  color: #7b8494;
   letter-spacing: 0.05em;
 }
 
@@ -630,7 +642,7 @@ body {
 .check-symbolic { color: #9ca3af; font-style: italic; }
 
 .check-td-note {
-  color: #4b5563;
+  color: #7b8494;
   padding: 2px 0;
   vertical-align: top;
 }
@@ -639,7 +651,7 @@ body {
 .check-preserved,
 .check-violated {
   font-size: 11px;
-  color: #6b7280;
+  color: #8b93a1;
 }
 
 .check-violated code {
@@ -665,7 +677,7 @@ body {
 
 .proof-idle-desc {
   font-size: 13px;
-  color: #6b7280;
+  color: #8b93a1;
   max-width: 480px;
   line-height: 1.6;
 }
@@ -701,7 +713,7 @@ body {
   justify-content: center;
   height: 100%;
   font-size: 13px;
-  color: #6b7280;
+  color: #8b93a1;
 }
 
 .proof-error {
@@ -726,7 +738,7 @@ body {
 
 .proof-stats {
   font-size: 12px;
-  color: #6b7280;
+  color: #8b93a1;
   flex: 1;
 }
 
@@ -795,7 +807,7 @@ body {
 
 .proof-output summary {
   font-size: 12px;
-  color: #6b7280;
+  color: #8b93a1;
   cursor: pointer;
   user-select: none;
 }
@@ -834,7 +846,7 @@ body {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #4b5563;
+  color: #7b8494;
 }
 
 .proof-tree-item {
@@ -875,7 +887,7 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #4b5563;
+  color: #7b8494;
   font-size: 13px;
 }
 
@@ -889,7 +901,7 @@ body {
   padding: 6px 14px;
   font-size: 11px;
   font-family: monospace;
-  color: #6b7280;
+  color: #8b93a1;
   border-bottom: 1px solid #1f2937;
   flex-shrink: 0;
 }
