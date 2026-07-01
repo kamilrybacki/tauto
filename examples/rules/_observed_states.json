@@ -1,0 +1,4 @@
+{
+  "Mortgage.status": ["UnderReview", "Approved", "Rejected", "Funded", "Closed", "Refinanced", "Defaulted"],
+  "Package.status": ["Pending", "Dispatched", "InTransit", "Delivered"]
+}

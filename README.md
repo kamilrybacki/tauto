@@ -74,6 +74,14 @@ each entity's transitions and coverage gaps — states with no incoming/outgoing
 transition, or **isolated** states no rule touches at all (a declared state you
 haven't written a rule for yet).
 
+When real data exists, `GET /api/v1/reconcile` (MCP `reconcile_states`) completes
+the declared state domains against observed ones. A **state source** — a live
+database when configured, else a `_observed_states.json` descriptor (mapping
+`Entity.field: [values]`), else none — yields the observed states, and tauto
+reports per field the `observed_not_declared` (suggested completions) and
+`declared_not_observed` (unseen). Advisory and additive: it proposes completions,
+never rewrites the glossary — logic set up before data stays valid.
+
 ## Commands
 
 | Command | Purpose |

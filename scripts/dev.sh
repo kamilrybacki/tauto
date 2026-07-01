@@ -11,6 +11,7 @@
 #   scripts/dev.sh check <file.md>    Dry-run a proposed rule file via POST /api/v1/check
 #   scripts/dev.sh glossary           Show the domain glossary (GET /api/v1/glossary)
 #   scripts/dev.sh lifecycle          Show state-machine coverage (GET /api/v1/lifecycle)
+#   scripts/dev.sh reconcile          Reconcile declared vs observed states (GET /api/v1/reconcile)
 #   scripts/dev.sh mcp                Run the MCP stdio server against the local serve (interactive)
 #   scripts/dev.sh mcp-call <tool> [json-args]
 #                                     One-shot MCP tool call, e.g.
@@ -84,6 +85,11 @@ cmd_lifecycle() {
     curl -s "$BASE/api/v1/lifecycle" | pp
 }
 
+cmd_reconcile() {
+    wait_for_serve
+    curl -s "$BASE/api/v1/reconcile" | pp
+}
+
 cmd_mcp() {
     need_bin
     wait_for_serve
@@ -151,6 +157,7 @@ case "${1:-}" in
     check)     shift; cmd_check "$@" ;;
     glossary)  cmd_glossary ;;
     lifecycle) cmd_lifecycle ;;
+    reconcile) cmd_reconcile ;;
     mcp)       cmd_mcp ;;
     mcp-call)  shift; cmd_mcp_call "$@" ;;
     demo)      cmd_demo ;;

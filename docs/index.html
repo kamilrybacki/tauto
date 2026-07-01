@@ -381,6 +381,29 @@ assumes:
   <code>GET /api/v1/lifecycle</code> and the <code>state_coverage</code> MCP tool.
 </div>
 
+<h3><span class="secnum">5.2</span> State completeness from data</h3>
+
+<p>
+  A glossary is declared <em>first</em>, before any data need exist — logic can be
+  authored up front. When real datasets are present, their state domains can
+  <em>complete</em> the declared ones. <em>tauto</em> reconciles the two: a
+  <em>state source</em> (a live database, an ODCS data contract, or a native
+  descriptor file) yields the states observed for each field, and tauto reports,
+  per state field, <code>observed_not_declared</code> (states in the data the
+  glossary is missing — suggested completions) and <code>declared_not_observed</code>
+  (declared but unseen — a future state or a typo). Source precedence is
+  database&nbsp;&rarr;&nbsp;file&nbsp;&rarr;&nbsp;none, reported in the response.
+</p>
+
+<div class="theorem-env remark">
+  <span class="env-title">Remark 5.4.</span>
+  Reconciliation is <em>advisory, additive, and re-runnable</em>: it proposes
+  completions and never mutates the glossary. Logic set up before data stays
+  valid; when the true datasets arrive, tauto suggests the states you had not yet
+  declared rather than requiring them. Exposed as <code>GET /api/v1/reconcile</code>
+  and the <code>reconcile_states</code> MCP tool.
+</div>
+
 <h2 id="lean"><span class="secnum">6</span> The Lean Backend</h2>
 
 <p>
@@ -447,6 +470,7 @@ tauto serve ./rules --port 4000
     <tr><td><code>POST /api/v1/check</code></td><td>Dry-run validation of a proposed rule; returns verdict, tests, and glossary warnings. Writes nothing.</td></tr>
     <tr><td><code>GET /api/v1/glossary</code></td><td>The domain glossary: entities with their aliases, fields, enums, and operations.</td></tr>
     <tr><td><code>GET /api/v1/lifecycle</code></td><td>State-machine coverage per entity state field: transitions and gaps (no-incoming / no-outgoing / isolated / undeclared).</td></tr>
+    <tr><td><code>GET /api/v1/reconcile</code></td><td>Reconcile declared state domains against observed data (database / file / none): suggested completions and unseen states.</td></tr>
   </tbody>
 </table>
 
