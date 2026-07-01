@@ -267,6 +267,39 @@ async fn handle_upload(
         std::fs::write(&dest, content).map_err(api_err)?;
 
         let (cs, parse_errors, _) = scan_path(&dest).map_err(api_err)?;
+
+        // Conflict gate: reject if this upload introduces a conflict against existing rules.
+        // Roll back the written file and return 409 so the contract store stays consistent.
+        let (full_cs, _, _) = scan_path(&state.contracts_path).map_err(api_err)?;
+        let all_conflicts = find_conflict_candidates(&full_cs);
+        if !all_conflicts.is_empty() {
+            let uploaded_keys: HashSet<String> = cs
+                .contracts
+                .iter()
+                .map(|c| format!("{}/{}/{}", c.entity, c.operation, c.case))
+                .collect();
+            let introduced: Vec<_> = all_conflicts
+                .iter()
+                .filter(|c| {
+                    uploaded_keys.contains(&c.key_a) || uploaded_keys.contains(&c.key_b)
+                })
+                .collect();
+            if !introduced.is_empty() {
+                std::fs::remove_file(&dest).ok();
+                return Err((
+                    StatusCode::CONFLICT,
+                    Json(serde_json::json!({
+                        "error": "Contract conflicts with existing rules",
+                        "conflicts": introduced.iter().map(|c| serde_json::json!({
+                            "key_a": c.key_a,
+                            "key_b": c.key_b,
+                            "reason": c.reason
+                        })).collect::<Vec<_>>()
+                    })),
+                ));
+            }
+        }
+
         return Ok(Json(UploadResponse {
             filename,
             contracts: cs.contracts.len(),
