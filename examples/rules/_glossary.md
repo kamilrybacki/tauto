@@ -13,12 +13,13 @@ inside a `Mortgage` rule (the Order-vs-Package distinction).
 entity Mortgage
 aka: loan
 describes: A home loan moving through underwriting, funding, and closing.
+states:
+  status: enum(UnderReview, Approved, Rejected, Funded, Closed, Refinanced)
 fields:
   credit_score: int
   debt_to_income_ratio: int
   employment_verified: bool
   income: int
-  status: enum(UnderReview, Approved, Rejected, Funded, Closed, Refinanced)
   interest_rate: enum(Standard, Reduced, Premium)
   max_term_years: int
   closing_documents_signed: bool
@@ -45,9 +46,10 @@ aka: package, parcel
 describes: A physical shipment moving through a fulfillment pipeline. Defined
   here to demonstrate cross-entity disambiguation — a Mortgage rule that
   references package.* fields is flagged.
+states:
+  status: enum(Pending, Dispatched, InTransit, Delivered, Returned)
 fields:
   weight_kg: int
-  status: enum(Pending, Dispatched, InTransit, Delivered, Returned)
   tracking_number: string
 operations:
   dispatch

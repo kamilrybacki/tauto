@@ -238,14 +238,25 @@ assumes:
   ↔ Mortgage/approveApplication/LegacyRejectPrimeApplication
   reason: `result.status` cannot be both `Approved` and `Rejected`</code></pre>
 
+<p>
+  Crucially, a contradiction in <code>ensures</code> is a conflict only when the
+  two rules can actually apply to the same input — when their <code>requires</code>
+  sets can hold <em>simultaneously</em>. Two rules guarding disjoint states
+  (<code>ship</code> of a <code>Paid</code> order &rarr; <code>Shipped</code> vs an
+  <code>Unpaid</code> order &rarr; <code>Rejected</code>) are distinct transitions of
+  the entity's lifecycle, not a contradiction. tauto therefore <em>suppresses</em> a
+  candidate whose preconditions are mutually exclusive — a shared field with
+  disjoint constraints, e.g. <code>== Paid</code> vs <code>== Unpaid</code>, or
+  <code>&ge; 750</code> vs <code>&lt; 750</code>.
+</p>
+
 <div class="theorem-env remark">
   <span class="env-title">Remark 3.2.</span>
-  Detection is deliberately <em>over-approximate on postconditions and
-  under-approximate on preconditions</em>: it does not attempt to prove that the two
-  rules' <code>requires</code> sets can be satisfied simultaneously. Mutually
-  exclusive preconditions therefore may produce a candidate that is not a true logical
-  conflict. Every candidate is a prompt for human (or, eventually, Lean) review—never
-  a verdict. See §<a href="#limitations">8</a>.
+  Detection remains <em>over-approximate on postconditions</em>: a surviving
+  candidate has contradictory outcomes and preconditions that are not provably
+  disjoint, but a full proof of simultaneous satisfiability is left to Lean. Every
+  candidate is a prompt for human (or, eventually, Lean) review—never a verdict.
+  See §<a href="#limitations">8</a>.
 </div>
 
 <h2 id="testgen"><span class="secnum">4</span> Test-Suite Generation</h2>
@@ -311,9 +322,20 @@ assumes:
   <code>loan.credit_score</code> resolves to a Mortgage field), <em>fields</em>
   the declared fields (each optionally typed <code>int</code>/<code>bool</code>/
   <code>string</code>/<code>enum(&hellip;)</code>), and <em>operations</em> the
-  permitted operations. Definitions live in ` ```glossary ` blocks, discovered by
-  the same scanner as contracts.
+  permitted operations. Fields declared under a <code>states:</code> section are
+  <em>determinant</em> (state) fields — the enum-valued lifecycle variables that
+  select which guarded transition applies. Definitions live in ` ```glossary `
+  blocks, discovered by the same scanner as contracts.
 </div>
+
+<p>
+  State fields tie the glossary to conflict detection (§3): a rule on a stateful
+  entity should guard on its state field explicitly, naming the source state a
+  transition starts from — a rule that does not is flagged
+  <code>missing_state_guard</code>. Making source states explicit is what lets the
+  detector recognise disjoint-guard rules as distinct lifecycle transitions rather
+  than conflicts.
+</p>
 
 <p>
   Given a glossary, <em>tauto</em> validates each contract's references and emits

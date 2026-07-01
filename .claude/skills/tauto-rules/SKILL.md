@@ -39,8 +39,12 @@ rules.
    invent thresholds, statuses, or field names the user did not give.
 
 3. **Translate** to the DSL (grammar below), using the canonical entity name,
-   its `aka` prefix for field paths, and declared enum members. Show the user
-   the contract block you produced and let them correct it before checking.
+   its `aka` prefix for field paths, and declared enum members. If the entity
+   has a **state** field (a determinant the glossary lists under `states:`, e.g.
+   `Order.status`), make the rule guard on it explicitly in `requires` — name
+   the source state the transition starts from (`order.status == Paid`). Rules
+   from disjoint source states are distinct transitions, not conflicts. Show the
+   user the contract block you produced and let them correct it before checking.
 
 4. **Check** by calling the MCP `check_rule` tool with the contract markdown as
    the `contract` argument (see "Calling the check").
@@ -135,8 +139,10 @@ If the tauto MCP server is not connected, it is provided by this repo:
   category, message }`. Categories: `unknown_entity`, `unknown_operation`,
   `unknown_field`, `cross_entity_reference` (a field path reaching into another
   entity's vocabulary — e.g. `package.*` in a `Mortgage` rule),
-  `unknown_prefix`, `unknown_enum_value`. These never block; they signal the
-  rule drifted from the domain vocabulary. Reconcile each one.
+  `unknown_prefix`, `unknown_enum_value`, and `missing_state_guard` (a rule on a
+  stateful entity that never guards on its **state** field, so its source state
+  is implicit). These never block; they signal the rule drifted from the domain
+  vocabulary. Reconcile each one.
 - `tests` — a generated suite: `proposed[]` (cases for the new rule) and a
   `regression_suites` count (existing rules re-tested). Each case has an `id`,
   a `kind` (`happy_path` or `precondition_violation`), and `should_pass`.

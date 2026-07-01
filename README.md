@@ -54,11 +54,19 @@ curl -X POST http://localhost:4000/api/v1/check \
 Declare your domain vocabulary in ` ```glossary ` blocks (e.g. a `_glossary.md`
 in the contracts dir): each entity's canonical name, its instance-prefix aliases
 (`loan` for `Mortgage`, so `loan.credit_score` resolves), fields, enum members,
-and operations. `POST /api/v1/check` then returns advisory `glossary_warnings`
-for a proposed rule — unknown fields, undeclared enum values, or a `package.*`
-reference inside a `Mortgage` rule (the Order-vs-Package distinction). Warnings
-never block; an empty glossary is inert. `GET /api/v1/glossary` returns it, and
-the MCP `get_glossary` tool exposes it to authoring agents.
+operations, and — under a `states:` section — the enum-valued **state**
+(determinant) fields that drive the entity's lifecycle. `POST /api/v1/check`
+then returns advisory `glossary_warnings` for a proposed rule — unknown fields,
+undeclared enum values, a `package.*` reference inside a `Mortgage` rule (the
+Order-vs-Package distinction), or a `missing_state_guard` when a rule on a
+stateful entity doesn't name its source state. Warnings never block; an empty
+glossary is inert. `GET /api/v1/glossary` returns it, and the MCP `get_glossary`
+tool exposes it to authoring agents.
+
+Declaring state fields also sharpens conflict detection: two rules on the same
+operation guarding **disjoint** states (`status == Paid` → Shipped vs
+`status == Unpaid` → Rejected) are distinct lifecycle transitions, not a
+conflict — tauto suppresses that false positive.
 
 ## Commands
 
