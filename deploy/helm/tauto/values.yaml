@@ -1,6 +1,10 @@
 image:
   repository: ghcr.io/kamilrybacki/tauto
-  tag: ""          # defaults to .Chart.AppVersion
+  # Pinned to the published image's short commit SHA. CI bumps this on every
+  # main build (see the "Pin chart image tag" step in .github/workflows/ci.yml),
+  # so the chart always tracks the latest image while staying immutable for
+  # GitOps / ArgoCD change detection.
+  tag: "b9ddaaa"
   pullPolicy: IfNotPresent
 
 # How contracts reach the container.
