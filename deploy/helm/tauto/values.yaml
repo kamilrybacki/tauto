@@ -4,7 +4,7 @@ image:
   # main build (see the "Pin chart image tag" step in .github/workflows/ci.yml),
   # so the chart always tracks the latest image while staying immutable for
   # GitOps / ArgoCD change detection.
-  tag: "b9ddaaa"
+  tag: "0ac521d"
   pullPolicy: IfNotPresent
 
 # How contracts reach the container.
