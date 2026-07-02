@@ -152,7 +152,9 @@ jobs:
   docker:
     name: Build and push Docker image
     runs-on: ubuntu-latest
-    needs: test
+    # Gate the deploy on every capability check — nothing ships that fails the
+    # test suite, the real lake build, the E2E flow, or the capability benchmark.
+    needs: [test, lean-verify, e2e, benchmark]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -221,7 +223,7 @@ jobs:
   release:
     name: GitHub Release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, lean-verify, e2e, benchmark]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
