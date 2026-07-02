@@ -151,6 +151,28 @@ contracts to LLMs (`list_contracts`, `search_contracts`, `find_conflicts`,
 a proposed rule). The `.claude/skills/tauto-rules/` skill drives the full loop:
 converse about a new rule, translate it to the DSL, and check it via `check_rule`.
 
+## Lean build service (Proofs compilation)
+
+The Proofs panel's `lake build` runs in a **separate, pluggable build service**,
+not the web pod — so the ~800 MB Lean toolchain never bloats or slows the web
+image. `tauto serve` POSTs the generated workspace to `TAUTO_LAKE_URL`; if unset
+or unreachable, Proofs degrades gracefully (`build_available: false`) and still
+shows the sorry-stubbed obligations.
+
+The backend is any service implementing a minimal HTTP contract, so you can run
+the bundled reference worker or point at your **own Lake deployment**:
+
+```
+POST <TAUTO_LAKE_URL>   { "files": [ { "path": "...", "content": "..." }, ... ] }
+                     -> { "success": bool, "stdout": "...", "stderr": "..." }
+GET  /health            -> 200
+```
+
+Reference implementation: `tauto lake-worker --port 4001` (shipped as the
+`tauto-lake` image, which bundles Lean; runs `lake build` against whatever
+toolchain is on PATH). In the Helm chart it's a gated `lakeWorker` Deployment +
+Service; set `TAUTO_LAKE_URL=http://tauto-lake:4001/build`.
+
 ## Limitations
 
 Conflict detection is a **heuristic** that surfaces candidates for review, not a

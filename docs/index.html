@@ -429,6 +429,17 @@ assumes:
   generated statements are <em>well-typed</em>.
 </p>
 
+<p>
+  Compilation runs in a <em>separate, pluggable build service</em> rather than the
+  web process, so the Lean toolchain never bloats the served image. The server
+  POSTs the workspace to <code>TAUTO_LAKE_URL</code> under a minimal contract
+  (<code>POST {files:[{path,content}]} &rarr; {success,stdout,stderr}</code>) that
+  any Lake deployment can implement; <code>tauto lake-worker</code> is the
+  reference implementation. When no builder is configured, the Proofs view
+  degrades gracefully—it still generates and shows the obligations, only skipping
+  the compile.
+</p>
+
 <div class="theorem-env limitation">
   <span class="env-title">Caveat 5.1 (Stubs, not proofs).</span>
   The body of every generated theorem is <code>sorry</code>. A successful build
