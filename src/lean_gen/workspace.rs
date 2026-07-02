@@ -105,8 +105,11 @@ fn contract_file(contract: &ContractIR, module_name: &str) -> LeanWorkspaceFile 
     body.push(format!("end Tauto.Contracts.{module_name}"));
     body.push(String::new());
 
+    // Path must match the import module `TautoContracts.contracts.<name>`: Lake
+    // resolves that to <root>/TautoContracts/contracts/<name>.lean, so the file
+    // lives under the library directory, not a top-level contracts/ dir.
     LeanWorkspaceFile {
-        path: format!("contracts/{module_name}.lean"),
+        path: format!("TautoContracts/contracts/{module_name}.lean"),
         content: body.join("\n"),
     }
 }
@@ -199,7 +202,7 @@ mod tests {
     #[test]
     fn theorem_comment_uses_dot_notation_for_enum_values() {
         let ws = generate_lean_workspace(&rich_set());
-        let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
+        let f = ws.files.iter().find(|f| f.path.starts_with("TautoContracts/contracts/")).unwrap();
         // enum rhs values must use Lean 4 dot-notation
         assert!(f.content.contains(".Paid") || f.content.contains(".Cancelled"),
             "enum values must render with dot prefix, got:\n{}", f.content);
@@ -261,7 +264,7 @@ mod tests {
         let contract_files: Vec<_> = ws
             .files
             .iter()
-            .filter(|f| f.path.starts_with("contracts/") && f.path.ends_with(".lean"))
+            .filter(|f| f.path.starts_with("TautoContracts/contracts/") && f.path.ends_with(".lean"))
             .collect();
         assert_eq!(contract_files.len(), 1);
     }
@@ -269,15 +272,23 @@ mod tests {
     #[test]
     fn contract_file_path_uses_contracts_prefix() {
         let ws = generate_lean_workspace(&minimal_set());
-        let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
-        assert!(f.path.starts_with("contracts/"));
-        assert!(!f.path.contains("TautoContracts"));
+        let f = ws.files.iter().find(|f| f.path.starts_with("TautoContracts/contracts/")).unwrap();
+        assert!(f.path.ends_with(".lean"));
+        // The file path must correspond to the module the main index imports:
+        // TautoContracts/contracts/<name>.lean  <->  import TautoContracts.contracts.<name>
+        let module = f.path.trim_end_matches(".lean").replace('/', ".");
+        let main = ws.files.iter().find(|f| f.path == "TautoContracts.lean").unwrap();
+        assert!(
+            main.content.contains(&format!("import {module}")),
+            "main index must import the contract module; path={} module={module}\n{}",
+            f.path, main.content
+        );
     }
 
     #[test]
     fn contract_file_contains_namespace() {
         let ws = generate_lean_workspace(&minimal_set());
-        let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
+        let f = ws.files.iter().find(|f| f.path.starts_with("TautoContracts/contracts/")).unwrap();
         assert!(f.content.contains("namespace Tauto.Contracts."));
         assert!(f.content.contains("end Tauto.Contracts."));
     }
@@ -285,7 +296,7 @@ mod tests {
     #[test]
     fn rich_contract_produces_two_theorem_stubs() {
         let ws = generate_lean_workspace(&rich_set());
-        let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
+        let f = ws.files.iter().find(|f| f.path.starts_with("TautoContracts/contracts/")).unwrap();
         let sorry_count = f.content.matches("sorry").count();
         assert_eq!(sorry_count, 2);
     }
@@ -293,7 +304,7 @@ mod tests {
     #[test]
     fn theorem_stub_contains_sorry() {
         let ws = generate_lean_workspace(&rich_set());
-        let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
+        let f = ws.files.iter().find(|f| f.path.starts_with("TautoContracts/contracts/")).unwrap();
         assert!(f.content.contains("sorry"));
     }
 
@@ -301,8 +312,8 @@ mod tests {
     fn digit_leading_case_gets_c_prefix() {
         let cs = ContractSet::new(vec![ContractIR::new("1InvalidStart", "E", "op")]);
         let ws = generate_lean_workspace(&cs);
-        let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
-        assert!(f.path.starts_with("contracts/C"), "digit-leading names must be prefixed with C");
+        let f = ws.files.iter().find(|f| f.path.starts_with("TautoContracts/contracts/")).unwrap();
+        assert!(f.path.starts_with("TautoContracts/contracts/C"), "digit-leading names must be prefixed with C");
     }
 
     #[test]
@@ -315,7 +326,7 @@ mod tests {
         let paths: Vec<_> = ws
             .files
             .iter()
-            .filter(|f| f.path.starts_with("contracts/"))
+            .filter(|f| f.path.starts_with("TautoContracts/contracts/"))
             .map(|f| &f.path)
             .collect();
         assert_eq!(paths.len(), 2);
@@ -327,7 +338,7 @@ mod tests {
     fn empty_case_gets_contract_fallback() {
         let cs = ContractSet::new(vec![ContractIR::new("---", "E", "op")]);
         let ws = generate_lean_workspace(&cs);
-        let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
+        let f = ws.files.iter().find(|f| f.path.starts_with("TautoContracts/contracts/")).unwrap();
         assert!(f.path.contains("Contract"), "empty-after-sanitize must fall back to 'Contract'");
     }
 
@@ -344,7 +355,7 @@ mod tests {
         ]);
         let ws = generate_lean_workspace(&cs);
         let paths: Vec<_> =
-            ws.files.iter().filter(|f| f.path.starts_with("contracts/")).collect();
+            ws.files.iter().filter(|f| f.path.starts_with("TautoContracts/contracts/")).collect();
         assert_eq!(paths.len(), 3);
         let unique: std::collections::HashSet<_> = paths.iter().map(|f| &f.path).collect();
         assert_eq!(unique.len(), 3, "all three paths must be distinct");
@@ -364,7 +375,7 @@ mod tests {
             source: None,
         }]);
         let ws = generate_lean_workspace(&cs);
-        let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
+        let f = ws.files.iter().find(|f| f.path.starts_with("TautoContracts/contracts/")).unwrap();
         assert!(f.content.contains("-- Preserved invariants:"));
         assert!(f.content.contains("--   order.history.size > 0"));
     }
@@ -383,7 +394,7 @@ mod tests {
             source: None,
         }]);
         let ws = generate_lean_workspace(&cs);
-        let f = ws.files.iter().find(|f| f.path.starts_with("contracts/")).unwrap();
+        let f = ws.files.iter().find(|f| f.path.starts_with("TautoContracts/contracts/")).unwrap();
         assert!(f.content.contains("-- Assumed preconditions:"));
         assert!(f.content.contains("--   payment.verified == true"));
     }

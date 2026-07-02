@@ -59,7 +59,11 @@ mod tests {
         let main = dir.path().join("TautoContracts.lean");
         assert!(main.exists(), "TautoContracts.lean must be written");
 
-        let contract = dir.path().join("contracts").join("CancelPaidOrder.lean");
+        let contract = dir
+            .path()
+            .join("TautoContracts")
+            .join("contracts")
+            .join("CancelPaidOrder.lean");
         assert!(contract.exists(), "contract file must be written");
     }
 
@@ -96,6 +100,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ws = generate_lean_workspace(&minimal_set());
         write_lean_workspace(&ws, dir.path()).unwrap();
-        assert!(dir.path().join("contracts").is_dir());
+        assert!(dir.path().join("TautoContracts").join("contracts").is_dir());
     }
 }

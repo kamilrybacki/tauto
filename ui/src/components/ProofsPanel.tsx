@@ -68,8 +68,9 @@ export default function ProofsPanel() {
 
   const { data } = state;
 
-  const contractFiles = data.files.filter(f => f.path.startsWith('contracts/'));
-  const infraFiles = data.files.filter(f => !f.path.startsWith('contracts/'));
+  const CONTRACTS_DIR = 'TautoContracts/contracts/';
+  const contractFiles = data.files.filter(f => f.path.startsWith(CONTRACTS_DIR));
+  const infraFiles = data.files.filter(f => !f.path.startsWith(CONTRACTS_DIR));
 
   return (
     <div className="proof-panel">
@@ -107,7 +108,7 @@ export default function ProofsPanel() {
                   className={`proof-tree-item ${selected?.path === f.path ? 'active' : ''}`}
                   onClick={() => setSelected(f)}
                 >
-                  {f.path.replace('contracts/', '')}
+                  {f.path.replace(CONTRACTS_DIR, '')}
                 </button>
               ))}
             </>

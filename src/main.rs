@@ -226,6 +226,11 @@ fn run_verify(
         if strict && !diagnostics.is_empty() {
             std::process::exit(1);
         }
+        // A failed `lake build` is a real structural error (sorry-stubbed
+        // workspaces still compile), so --lean-check gates on it.
+        if lake_result.as_ref().is_some_and(|l| !l.success) {
+            std::process::exit(1);
+        }
         return Ok(());
     }
 
@@ -286,6 +291,12 @@ fn run_verify(
                 }
             }
         }
+    }
+
+    // A failed `lake build` is a real structural error (sorry-stubbed workspaces
+    // still compile), so --lean-check gates on it.
+    if lake_result.as_ref().is_some_and(|l| !l.success) {
+        std::process::exit(1);
     }
 
     Ok(())
