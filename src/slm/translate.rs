@@ -32,8 +32,10 @@ pub struct TranslationResult {
     pub provider: SlmProviderRef,
 }
 
-/// A provider that translates prose into the contract DSL.
-pub trait SlmTranslator {
+/// A provider that translates prose into the contract DSL. `Send + Sync` so a
+/// single instance (and its pooled HTTP client) can be built once and shared
+/// across requests via server state.
+pub trait SlmTranslator: Send + Sync {
     fn translate(&self, request: &TranslationRequest) -> Result<TranslationResult, SlmError>;
 }
 

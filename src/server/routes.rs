@@ -29,6 +29,9 @@ struct ServerState {
     contracts_path: PathBuf,
     history_path: PathBuf,
     history_lock: AsyncMutex<()>,
+    /// Built once at startup and reused (keeps one pooled HTTP client). `None`
+    /// when the SLM is not configured → `/translate` returns 503.
+    slm_translator: Option<Arc<dyn crate::slm::SlmTranslator>>,
 }
 
 type ApiResult<T> = Result<Json<T>, (StatusCode, Json<serde_json::Value>)>;
@@ -689,6 +692,15 @@ async fn handle_translate(
             })),
         ));
     }
+    // Not configured (no SLM at startup) → 503: it's a config problem, and a
+    // retry won't help until the operator sets a key.
+    let Some(translator) = state.slm_translator.clone() else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "SLM translation is not configured" })),
+        ));
+    };
+
     // Provide the glossary vocabulary as context so the SLM uses canonical names.
     let path = state.contracts_path.clone();
     let glossary = tokio::task::spawn_blocking(move || scan_glossary(&path))
@@ -703,25 +715,22 @@ async fn handle_translate(
     }
 
     let result = tokio::task::spawn_blocking(move || {
-        let translator = crate::slm::translator_from_env().map_err(|e| e.to_string())?;
-        translator
-            .translate(&crate::slm::TranslationRequest { prose: body, context })
-            .map_err(|e| e.to_string())
+        translator.translate(&crate::slm::TranslationRequest { prose: body, context })
     })
     .await
     .map_err(api_err)?;
 
     match result {
         Ok(r) => Ok(Json(r)),
-        // A missing/failed SLM provider is a configuration/upstream problem, not
-        // a bad request — 503. Log the detail (which may include the upstream
-        // provider's error body) server-side; return a generic message so we
-        // don't leak upstream internals to the client.
+        // The provider is configured but the upstream call failed — that's a
+        // bad-gateway condition (502), distinct from "not configured" (503).
+        // Log the detail (which may include the upstream error body); return a
+        // generic message so upstream internals don't leak to the client.
         Err(e) => {
             eprintln!("translate: SLM provider error: {e}");
             Err((
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({ "error": "SLM translation provider unavailable" })),
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({ "error": "SLM translation provider error" })),
             ))
         }
     }
@@ -834,10 +843,21 @@ async fn serve_inner(
     ui_dist: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let history_path = contracts_path.join("_history.json");
+    // Build the SLM translator once (reuses its pooled HTTP client). None when
+    // unconfigured — /translate then 503s.
+    let slm_translator: Option<Arc<dyn crate::slm::SlmTranslator>> =
+        match crate::slm::translator_from_env() {
+            Ok(t) => Some(Arc::from(t)),
+            Err(e) => {
+                eprintln!("SLM translation not configured: {e} (/api/v1/translate will 503)");
+                None
+            }
+        };
     let state = Arc::new(ServerState {
         contracts_path: contracts_path.clone(),
         history_path,
         history_lock: AsyncMutex::new(()),
+        slm_translator,
     });
 
     let index_html = ui_dist.join("index.html");

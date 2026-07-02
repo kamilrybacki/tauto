@@ -53,14 +53,18 @@ pub fn run_lake_worker(port: u16) -> Result<(), Box<dyn std::error::Error>> {
 
 async fn serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(WorkerState { build_lock: AsyncMutex::new(()) });
+    // `/v1/build` is the versioned contract; `/build` is kept as an unversioned
+    // alias for back-compat with existing TAUTO_LAKE_URL settings.
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
+        .route("/v1/health", get(|| async { "ok" }))
         .route("/build", post(handle_build))
+        .route("/v1/build", post(handle_build))
         .with_state(state);
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    eprintln!("tauto lake-worker → http://0.0.0.0:{port}  (POST /build, GET /health)");
+    eprintln!("tauto lake-worker → http://0.0.0.0:{port}  (POST /v1/build, GET /v1/health)");
     axum::serve(listener, app).await?;
     Ok(())
 }
