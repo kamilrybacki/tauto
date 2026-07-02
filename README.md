@@ -46,9 +46,11 @@ the verified pipeline (`/check` → proofs). The SLM never emits proofs and noth
 is persisted — "it compiles" is not "it's faithful", so the DSL review is the
 checkpoint, and the deterministic DSL→Lean→lake path runs downstream.
 
-The provider is pluggable and **opt-in**: it defaults to a deterministic stub
-(offline, no model); a live model is used only when `TAUTO_SLM_PROVIDER=deepseek`
-and `DEEPSEEK_API_KEY` are set. For rules the DSL can't express, extend the
+The SLM is a **required** capability: the real provider (DeepSeek) is the
+default and `/translate` returns **503** if it is not configured — it never
+silently degrades to the stub. `DEEPSEEK_API_KEY` is read from a secret (never
+committed). The deterministic stub is available only for offline/testing via an
+explicit `TAUTO_SLM_PROVIDER=stub`. For rules the DSL can't express, extend the
 DSL/IR rather than emit unverifiable Lean.
 
 ## Checking a proposed rule (for agents)

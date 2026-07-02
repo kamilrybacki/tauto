@@ -692,14 +692,23 @@ async fn handle_translate(
     }
 
     let result = tokio::task::spawn_blocking(move || {
-        let translator = crate::slm::translator_from_env();
-        translator.translate(&crate::slm::TranslationRequest { prose: body, context })
+        let translator = crate::slm::translator_from_env().map_err(|e| e.to_string())?;
+        translator
+            .translate(&crate::slm::TranslationRequest { prose: body, context })
+            .map_err(|e| e.to_string())
     })
     .await
-    .map_err(api_err)?
-    .map_err(|e| api_err(e.to_string()))?;
+    .map_err(api_err)?;
 
-    Ok(Json(result))
+    match result {
+        Ok(r) => Ok(Json(r)),
+        // A missing/failed SLM provider is a configuration problem, not a bad
+        // request — surface it as 503 so the caller knows the SLM is required.
+        Err(e) => Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": format!("SLM translation unavailable: {e}") })),
+        )),
+    }
 }
 
 // ── /api/v1/glossary ──────────────────────────────────────────────────────────
