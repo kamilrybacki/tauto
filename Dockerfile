@@ -14,28 +14,24 @@ COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src/
 RUN cargo build --release
 
-# Stage 3: download and warm up the Lean toolchain.
-# Running `lake --version` forces elan to download the stable toolchain into
-# this layer so the runtime image never fetches anything at start.
-FROM debian:bookworm-slim AS lean-installer
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-RUN curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
-    | sh -s -- -y --default-toolchain leanprover/lean4:stable \
-    && /root/.elan/bin/lake --version
-
-# Stage 4: minimal runtime image
+# Stage 3: minimal runtime image — the Rust binary + built UI only.
+#
+# The Lean toolchain is intentionally NOT shipped here: it added ~800 MB (slow
+# pulls, long Recreate rollouts) and running `lake build` in the serving pod
+# starved the liveness probe. The Proofs endpoint degrades gracefully when
+# `lake` is absent (build_available:false) — it still generates and displays the
+# sorry-stubbed proof obligations in-process. The real `lake build` check runs
+# in CI (the lean-verify job), not on the live pod.
 FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libssl3 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=rust-builder   /build/target/release/tauto /usr/local/bin/tauto
-COPY --from=ui-builder     /build/ui/dist               /opt/tauto/ui/dist
-COPY --from=lean-installer /root/.elan                  /root/.elan
+COPY --from=rust-builder /build/target/release/tauto /usr/local/bin/tauto
+COPY --from=ui-builder   /build/ui/dist              /opt/tauto/ui/dist
 
-ENV PATH="/root/.elan/bin:$PATH"
+# No Lean toolchain in this image, so skip the startup lake availability check.
+ENV TAUTO_SKIP_LEAN_CHECK=1
 
 EXPOSE 4000
 
