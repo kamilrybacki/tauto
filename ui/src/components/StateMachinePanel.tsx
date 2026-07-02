@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { ReactFlow, Background, Controls, type Node, type Edge } from '@xyflow/react';
+import { ReactFlow, Background, type Node, type Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { StateCoverage } from '../api/types';
 import { fetchLifecycle } from '../api/client';
@@ -11,12 +11,16 @@ type Load =
 
 type Category = 'initial' | 'terminal' | 'isolated' | 'undeclared' | 'normal';
 
+const INK = '#1c1814';
+const RED = '#8c2f22';
+const PAPER = '#faf7ef';
+
 const CATEGORY_STYLE: Record<Category, React.CSSProperties> = {
-  initial:    { border: '2px solid #22c55e' },
-  terminal:   { border: '2px solid #f59e0b' },
-  isolated:   { border: '2px dashed #f87171', opacity: 0.85 },
-  undeclared: { border: '2px solid #a78bfa' },
-  normal:     { border: '1px solid #4b5563' },
+  initial: { border: `2px solid ${INK}` },
+  terminal: { border: `3px double ${INK}` },
+  isolated: { border: `2px dashed ${RED}`, color: RED, fontStyle: 'italic' },
+  undeclared: { border: `2px dotted ${RED}`, color: RED },
+  normal: { border: `1px solid rgba(28,24,20,0.55)` },
 };
 
 function categorize(state: string, c: StateCoverage): Category {
@@ -27,14 +31,10 @@ function categorize(state: string, c: StateCoverage): Category {
   return 'normal';
 }
 
-/** Layered left-to-right layout: BFS distance from the initial (no-incoming)
- *  states along transitions; isolated states go in a trailing lane. Bounded so
- *  cycles can't loop forever. */
 function layout(c: StateCoverage): { nodes: Node[]; edges: Edge[] } {
-  const allStates = [...c.states, ...c.undeclared_states.filter(s => !c.states.includes(s))];
+  const allStates = [...c.states, ...c.undeclared_states.filter((s) => !c.states.includes(s))];
   const layer = new Map<string, number>();
-  c.no_incoming.forEach(s => layer.set(s, 0));
-  // Relaxation passes (cap = #states) push targets one layer past their source.
+  c.no_incoming.forEach((s) => layer.set(s, 0));
   for (let pass = 0; pass < allStates.length + 1; pass++) {
     for (const t of c.transitions) {
       if (!t.from || !t.to) continue;
@@ -43,72 +43,74 @@ function layout(c: StateCoverage): { nodes: Node[]; edges: Edge[] } {
     }
   }
   const maxLayer = Math.max(0, ...[...layer.values()]);
-  // Unplaced (unreachable & not initial): isolated → trailing lane; others → col 0.
-  allStates.forEach(s => {
+  allStates.forEach((s) => {
     if (!layer.has(s)) layer.set(s, c.isolated.includes(s) ? maxLayer + 1 : 0);
   });
 
   const perLayer = new Map<number, number>();
-  const nodes: Node[] = allStates.map(s => {
+  const nodes: Node[] = allStates.map((s) => {
     const l = layer.get(s) ?? 0;
     const idx = perLayer.get(l) ?? 0;
     perLayer.set(l, idx + 1);
     return {
       id: s,
-      position: { x: l * 210 + 30, y: idx * 84 + 30 },
+      position: { x: l * 200 + 24, y: idx * 78 + 24 },
       data: { label: s },
       style: {
         ...CATEGORY_STYLE[categorize(s, c)],
-        background: '#111827',
-        color: '#e5e7eb',
-        borderRadius: 8,
+        background: PAPER,
+        color: CATEGORY_STYLE[categorize(s, c)].color ?? INK,
+        borderRadius: 6,
+        fontFamily: 'IBM Plex Mono, monospace',
         fontSize: 12,
         padding: '6px 10px',
-        width: 150,
+        width: 148,
       },
     };
   });
 
   const edges: Edge[] = c.transitions
-    .filter(t => t.from && t.to)
+    .filter((t) => t.from && t.to)
     .map((t, i) => ({
       id: `${t.from}->${t.to}-${i}`,
       source: t.from!,
       target: t.to!,
       label: t.contract.split('/').pop(),
-      labelStyle: { fill: '#9ca3af', fontSize: 10 },
-      labelBgStyle: { fill: '#0f172a' },
-      style: { stroke: '#4b5563' },
+      labelStyle: { fill: 'rgba(28,24,20,0.7)', fontSize: 11, fontStyle: 'italic', fontFamily: 'IBM Plex Mono, monospace' },
+      labelBgStyle: { fill: PAPER },
+      style: { stroke: 'rgba(28,24,20,0.45)' },
     }));
 
   return { nodes, edges };
 }
 
-function CoverageDiagram({ c }: { c: StateCoverage }) {
+function CoverageFigure({ c, num }: { c: StateCoverage; num: number }) {
   const { nodes, edges } = useMemo(() => layout(c), [c]);
+  const transitions = c.transitions.filter((t) => t.from && t.to).length;
+  const flags: string[] = [];
+  if (c.isolated.length) flags.push(`isolated: ${c.isolated.join(', ')}`);
+  if (c.undeclared_states.length) flags.push(`undeclared (from data): ${c.undeclared_states.join(', ')}`);
   return (
-    <div className="sm-entity">
-      <div className="sm-entity-head">
-        <span className="sm-entity-title">{c.entity}<span className="sm-field">.{c.state_field}</span></span>
-        <span className="sm-counts">
-          {c.states.length} states · {c.transitions.filter(t => t.from && t.to).length} transitions
-          {c.isolated.length > 0 && <span className="sm-warn"> · {c.isolated.length} isolated</span>}
-        </span>
-      </div>
-      <div className="sm-canvas">
+    <figure className="figure">
+      <div className="figure-frame sm-canvas">
         <ReactFlow
           nodes={nodes}
           edges={edges}
           fitView
           nodesConnectable={false}
-          nodesDraggable
           proOptions={{ hideAttribution: true }}
+          colorMode="light"
+          aria-label={`Lifecycle of ${c.entity}.${c.state_field}`}
         >
-          <Background color="#1f2937" gap={18} />
-          <Controls showInteractive={false} />
+          <Background color="rgba(28,24,20,0.08)" gap={20} />
         </ReactFlow>
       </div>
-    </div>
+      <figcaption className="figcaption">
+        <b>Figure 3.{num}.</b> Lifecycle of <code>{c.entity}.{c.state_field}</code> — {c.states.length} declared
+        state{c.states.length !== 1 ? 's' : ''}, {transitions} transition{transitions !== 1 ? 's' : ''}.
+      </figcaption>
+      {flags.length > 0 && <p className="figure-note">{flags.join(' · ')}</p>}
+    </figure>
   );
 }
 
@@ -117,34 +119,29 @@ export default function StateMachinePanel() {
 
   useEffect(() => {
     fetchLifecycle()
-      .then(data => setLoad({ kind: 'done', data }))
+      .then((data) => setLoad({ kind: 'done', data }))
       .catch((e: unknown) => setLoad({ kind: 'error', message: e instanceof Error ? e.message : String(e) }));
   }, []);
 
-  if (load.kind === 'loading')
-    return <div className="sm-empty"><p>Loading lifecycles…</p></div>;
-  if (load.kind === 'error')
-    return <div className="sm-empty sm-error"><p>Error: {load.message}</p></div>;
+  if (load.kind === 'loading') return <p className="empty-note">Tracing lifecycles…</p>;
+  if (load.kind === 'error') return <p className="empty-note" style={{ color: 'var(--red)' }}>Error: {load.message}</p>;
   if (load.data.length === 0)
     return (
-      <div className="sm-empty">
-        <p>
-          No state fields declared. Mark an enum field as a <code>state</code> in the glossary
-          (a <code>states:</code> section) to see its lifecycle.
-        </p>
-      </div>
+      <p className="empty-note">
+        No state fields declared. Mark an enum field as a <code>state</code> in the glossary
+        (a <code>states:</code> section) to trace its lifecycle here.
+      </p>
     );
 
   return (
-    <div className="sm-panel">
-      <div className="sm-legend">
-        <span><i className="sm-dot sm-dot--initial" /> initial (no incoming)</span>
-        <span><i className="sm-dot sm-dot--terminal" /> terminal (no outgoing)</span>
-        <span><i className="sm-dot sm-dot--isolated" /> isolated (no rule)</span>
-        <span><i className="sm-dot sm-dot--undeclared" /> undeclared (from data)</span>
-      </div>
-      {load.data.map(c => (
-        <CoverageDiagram key={`${c.entity}.${c.state_field}`} c={c} />
+    <div>
+      <p className="prose" style={{ fontSize: 15, color: 'var(--ink-70)' }}>
+        Legend: solid border — initial (no incoming); double border — terminal (no outgoing);{' '}
+        <span style={{ color: 'var(--red)', fontStyle: 'italic' }}>dashed red — isolated</span> (no rule);{' '}
+        <span style={{ color: 'var(--red)' }}>dotted red — undeclared</span> (seen only in data).
+      </p>
+      {load.data.map((c, i) => (
+        <CoverageFigure key={`${c.entity}.${c.state_field}`} c={c} num={i + 1} />
       ))}
     </div>
   );

@@ -12,141 +12,118 @@ import {
 import '@xyflow/react/dist/style.css';
 import type { GraphResponse, GraphNodeData } from '../api/types';
 
-// xyflow requires NodeData to extend Record<string, unknown>
-type ContractNodeData = GraphNodeData & { selected: boolean } & Record<string, unknown>;
+type ContractNodeData = GraphNodeData & { selected: boolean; conflict: boolean } & Record<string, unknown>;
 
 function ContractNode({ data }: { data: ContractNodeData }) {
+  const r = data.requires_count as number;
+  const e = data.ensures_count as number;
   return (
     <div
-      style={{
-        padding: '8px 12px',
-        border: `2px solid ${data.selected ? '#6366f1' : '#374151'}`,
-        borderRadius: 8,
-        background: data.selected ? '#1e1b4b' : '#1f2937',
-        color: '#f9fafb',
-        minWidth: 190,
-        cursor: 'pointer',
-        transition: 'border-color 0.15s, background 0.15s',
-      }}
+      className={`rf-node${data.conflict ? ' conflict' : ''}`}
+      style={{ minWidth: 176, boxShadow: data.selected ? '0 0 0 2px #1f3a68' : 'none', cursor: 'pointer' }}
     >
-      <Handle type="target" position={Position.Left} style={{ background: '#4b5563' }} />
-      <div style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-        {data.entity}
+      <Handle type="target" position={Position.Left} style={{ background: 'var(--ink-60)', width: 5, height: 5 }} />
+      <div className="rf-node-title" style={{ fontWeight: 600 }}>{data.case}</div>
+      <div className="rf-node-sub">
+        {data.entity} · {data.operation}
       </div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#e5e7eb', marginTop: 2 }}>
-        {data.operation}
+      <div className="rf-node-sub">
+        {r} req · {e} ens{data.conflict ? ' · ⊥' : ''}
       </div>
-      <div style={{ fontSize: 11, color: '#d1d5db', marginTop: 1 }}>
-        {data.case}
-      </div>
-      {((data.requires_count as number) > 0 || (data.ensures_count as number) > 0) && (
-        <div style={{ marginTop: 5, fontSize: 10, color: '#6b7280', display: 'flex', gap: 6 }}>
-          {(data.requires_count as number) > 0 && (
-            <span style={{ color: '#fbbf24' }}>{data.requires_count as number} req</span>
-          )}
-          {(data.ensures_count as number) > 0 && (
-            <span style={{ color: '#34d399' }}>{data.ensures_count as number} ens</span>
-          )}
-        </div>
-      )}
-      <Handle type="source" position={Position.Right} style={{ background: '#4b5563' }} />
+      <Handle type="source" position={Position.Right} style={{ background: 'var(--ink-60)', width: 5, height: 5 }} />
     </div>
   );
 }
 
-// Cast needed: xyflow's NodeTypes expects ComponentType<NodeProps> which uses generic Record
-const nodeTypes = {
-  contract: ContractNode as NodeTypes['string'],
-} as NodeTypes;
+const nodeTypes = { contract: ContractNode as NodeTypes['string'] } as NodeTypes;
 
 function layoutNodes(rawNodes: GraphResponse['nodes']): Node<ContractNodeData>[] {
-  const entityOrder = [...new Set(rawNodes.map(n => n.data.entity))].sort();
+  const entityOrder = [...new Set(rawNodes.map((n) => n.data.entity))].sort();
   const entityX: Record<string, number> = {};
-  entityOrder.forEach((e, i) => { entityX[e] = i * 330; });
-
+  entityOrder.forEach((e, i) => { entityX[e] = i * 320; });
   const sorted = [...rawNodes].sort((a, b) => {
     const ei = entityOrder.indexOf(a.data.entity) - entityOrder.indexOf(b.data.entity);
     if (ei !== 0) return ei;
     if (a.data.operation !== b.data.operation) return a.data.operation.localeCompare(b.data.operation);
     return a.data.case.localeCompare(b.data.case);
   });
-
   const entityRow: Record<string, number> = {};
-  return sorted.map(n => {
+  return sorted.map((n) => {
     const row = entityRow[n.data.entity] ?? 0;
     entityRow[n.data.entity] = row + 1;
     return {
       id: n.id,
       type: 'contract',
-      position: { x: entityX[n.data.entity], y: row * 130 },
-      data: { ...n.data, selected: false } as ContractNodeData,
+      position: { x: entityX[n.data.entity], y: row * 118 },
+      data: { ...n.data, selected: false, conflict: false } as ContractNodeData,
     };
   });
 }
 
 interface ContractGraphProps {
   graph: GraphResponse;
+  slug: string;
   selected: string | null;
   onSelect: (id: string) => void;
 }
 
-export default function ContractGraph({ graph, selected, onSelect }: ContractGraphProps) {
-  const nodes = useMemo((): Node<ContractNodeData>[] => {
-    const laid = layoutNodes(graph.nodes);
-    return laid.map(n => ({
+export default function ContractGraph({ graph, slug, selected, onSelect }: ContractGraphProps) {
+  const conflictNodes = useMemo(() => {
+    const s = new Set<string>();
+    graph.edges.filter((e) => e.kind === 'conflict').forEach((e) => { s.add(e.source); s.add(e.target); });
+    return s;
+  }, [graph.edges]);
+
+  const nodes = useMemo((): Node<ContractNodeData>[] =>
+    layoutNodes(graph.nodes).map((n) => ({
       ...n,
-      data: { ...n.data, selected: n.id === selected },
-    }));
-  }, [graph.nodes, selected]);
+      data: { ...n.data, selected: n.id === selected, conflict: conflictNodes.has(n.id) },
+    })),
+  [graph.nodes, selected, conflictNodes]);
 
   const edges = useMemo((): Edge[] =>
-    graph.edges.map(e => ({
+    graph.edges.map((e) => ({
       id: e.id,
       source: e.source,
       target: e.target,
-      label: e.label,
+      label: e.kind === 'conflict' ? '⊥' : undefined,
       style: {
-        stroke: e.kind === 'conflict' ? '#ef4444' : '#6b7280',
-        strokeWidth: e.kind === 'conflict' ? 2 : 1,
-        strokeDasharray: e.kind === 'same_op' ? '6 4' : undefined,
+        stroke: e.kind === 'conflict' ? '#8c2f22' : 'rgba(28,24,20,0.3)',
+        strokeWidth: e.kind === 'conflict' ? 1.5 : 1,
+        strokeDasharray: '5 4',
       },
-      labelStyle: { fill: '#9ca3af', fontSize: 10 },
-      labelBgStyle: { fill: 'transparent' },
+      labelStyle: { fill: '#8c2f22', fontSize: 13, fontFamily: 'EB Garamond, serif' },
+      labelBgStyle: { fill: '#faf7ef' },
     })),
   [graph.edges]);
 
-  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-    onSelect(node.id);
-  }, [onSelect]);
+  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => onSelect(node.id), [onSelect]);
+
+  const ops = new Set(graph.nodes.map((n) => `${n.data.entity}/${n.data.operation}`)).size;
+  const conflicts = graph.edges.filter((e) => e.kind === 'conflict').length;
 
   return (
-    <div style={{ width: '100%', height: '100%', background: '#111827', position: 'relative' }}>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        onNodeClick={onNodeClick}
-        fitView
-        fitViewOptions={{ padding: 0.2 }}
-        attributionPosition="bottom-left"
-        colorMode="dark"
-      >
-        <Background color="#1f2937" gap={24} />
-        <Controls showInteractive={false} />
-      </ReactFlow>
-      <div className="legend">
-        <div className="legend-item">
-          <div
-            className="legend-line"
-            style={{ background: '#6b7280', backgroundImage: 'repeating-linear-gradient(to right, #6b7280, #6b7280 6px, transparent 6px, transparent 10px)' }}
-          />
-          <span>same operation</span>
-        </div>
-        <div className="legend-item">
-          <div className="legend-line" style={{ background: '#ef4444', height: 2 }} />
-          <span>conflict candidate</span>
-        </div>
+    <figure className="figure">
+      <div className="figure-frame graph-canvas">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodeClick={onNodeClick}
+          fitView
+          fitViewOptions={{ padding: 0.2 }}
+          proOptions={{ hideAttribution: true }}
+          colorMode="light"
+          aria-label="Rule dependency graph"
+        >
+          <Background color="rgba(28,24,20,0.08)" gap={26} />
+          <Controls showInteractive={false} />
+        </ReactFlow>
       </div>
-    </div>
+      <figcaption className="figcaption">
+        <b>Figure 1.</b> Rule dependency graph for <em>{slug || 'default'}</em>: {graph.nodes.length} rules
+        across {ops} operations{conflicts > 0 ? `, ${conflicts} candidate contradiction${conflicts !== 1 ? 's' : ''} (⊥)` : ''}.
+      </figcaption>
+    </figure>
   );
 }

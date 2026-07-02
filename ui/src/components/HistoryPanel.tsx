@@ -4,57 +4,40 @@ interface HistoryPanelProps {
   entries: HistoryEntry[];
 }
 
-function formatTime(unix: number): string {
-  return new Date(unix * 1000).toLocaleString();
-}
-
-function OutcomeBadge({ outcome }: { outcome: HistoryEntry['outcome'] }) {
-  const accepted = outcome === 'accepted';
-  return (
-    <span className={`history-badge ${accepted ? 'history-badge--accepted' : 'history-badge--rejected'}`}>
-      {accepted ? 'accepted' : 'rejected'}
-    </span>
-  );
-}
+const caseOf = (key: string): string => key.split('/').pop() ?? key;
+const formatTime = (unix: number): string => new Date(unix * 1000).toLocaleString();
 
 export default function HistoryPanel({ entries }: HistoryPanelProps) {
   if (entries.length === 0) {
     return (
-      <div className="history-empty">
-        No uploads yet. Use the upload API to add contract files.
-      </div>
+      <p className="empty-note">
+        No revisions yet. Submitted rules (via the referee report, or the upload API) are recorded here,
+        newest first.
+      </p>
     );
   }
 
+  const ordered = [...entries].sort((a, b) => b.id - a.id);
+
   return (
-    <div className="history-panel">
-      <div className="history-list">
-        {entries.map(entry => (
-          <div key={entry.id} className={`history-entry history-entry--${entry.outcome}`}>
-            <div className="history-entry-header">
-              <OutcomeBadge outcome={entry.outcome} />
-              <span className="history-filename">{entry.filename}</span>
-              <span className="history-time">{formatTime(entry.timestamp_unix)}</span>
+    <div className="revlist">
+      {ordered.map((entry, i) => (
+        <div key={entry.id} className="rev">
+          <span className="revn">Rev. {ordered.length - i}</span>
+          <span className="file">{entry.filename}</span>
+          <span className={`outcome ${entry.outcome}`}>{entry.outcome}</span>
+          <span className="meta">
+            {entry.contracts_count} contract{entry.contracts_count !== 1 ? 's' : ''}
+            {entry.parse_errors > 0 && ` · ${entry.parse_errors} parse error${entry.parse_errors !== 1 ? 's' : ''}`}
+          </span>
+          <span className="time">{formatTime(entry.timestamp_unix)}</span>
+          {entry.conflicts.map((c, j) => (
+            <div className="rev-bot" key={j}>
+              ⊥ barred by {caseOf(c.key_a)} ↔ {caseOf(c.key_b)} — {c.reason}
             </div>
-            <div className="history-meta">
-              {entry.contracts_count} contract{entry.contracts_count !== 1 ? 's' : ''}
-              {entry.parse_errors > 0 && (
-                <span className="history-parse-errors"> · {entry.parse_errors} parse error{entry.parse_errors !== 1 ? 's' : ''}</span>
-              )}
-            </div>
-            {entry.conflicts.length > 0 && (
-              <div className="history-conflicts">
-                {entry.conflicts.map((c, i) => (
-                  <div key={i} className="history-conflict-item">
-                    <span className="history-conflict-keys">{c.key_a} ↔ {c.key_b}</span>
-                    <span className="history-conflict-reason">{c.reason}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

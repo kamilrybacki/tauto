@@ -1,66 +1,158 @@
-import type { ContractItem } from '../api/types';
+import type { ContractItem, Condition, ForbiddenOperation, GraphEdge } from '../api/types';
 
 interface Props {
   contracts: ContractItem[];
-  selected: ContractItem | null;
+  conflicts: GraphEdge[];
+  selected: string | null;
   onSelect: (item: ContractItem) => void;
+  onJump: (key: string) => void;
 }
 
-export default function ContractList({ contracts, selected, onSelect }: Props) {
-  const groups = contracts.reduce<Record<string, ContractItem[]>>((acc, c) => {
-    const key = c.entity;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(c);
-    return acc;
-  }, {});
+const cond = (c: Condition): string =>
+  `${String(c.left.value)} ${c.operator} ${String(c.right.value)}`;
+
+const forbidden = (f: ForbiddenOperation): string =>
+  `${f.operation}(${(f.args ?? []).map((a) => String(a.value)).join(', ')})`;
+
+const caseOf = (key: string): string => key.split('/').pop() ?? key;
+
+const NOMEN: [string, string][] = [
+  ['requires', 'Preconditions — all must hold for the operation to apply.'],
+  ['⊢', 'Turnstile — the requires above entail the ensures below.'],
+  ['ensures', 'Postconditions guaranteed of the result when it applies.'],
+  ['forbidden', 'Operations that must not occur.'],
+  ['preserves', 'Field paths whose value is unchanged.'],
+  ['assumes', 'Ambient facts taken as given, not checked.'],
+  ['⊥', 'Contradiction — two rules that cannot both hold.'],
+];
+
+export default function ContractList({ contracts, conflicts, selected, onSelect, onJump }: Props) {
+  const conflictEdges = conflicts.filter((e) => e.kind === 'conflict');
 
   return (
-    <div style={{ padding: '16px', overflowY: 'auto', height: '100%', maxWidth: 640 }}>
-      {Object.entries(groups)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([entity, items]) => (
-          <div key={entity} style={{ marginBottom: 28 }}>
-            <h3
-              style={{
-                color: '#6366f1',
-                fontSize: 11,
-                textTransform: 'uppercase',
-                letterSpacing: '0.1em',
-                marginBottom: 10,
-                fontWeight: 600,
-              }}
-            >
-              {entity}
-            </h3>
-            {items.map(c => (
-              <div
-                key={c.key}
-                onClick={() => onSelect(c)}
-                style={{
-                  padding: '10px 14px',
-                  marginBottom: 6,
-                  borderRadius: 8,
-                  cursor: 'pointer',
-                  background: selected?.key === c.key ? '#1e1b4b' : '#1f2937',
-                  border: `1px solid ${selected?.key === c.key ? '#6366f1' : '#374151'}`,
-                  transition: 'background 0.1s, border-color 0.1s',
-                }}
-              >
-                <div style={{ fontSize: 13, fontWeight: 500, color: '#e5e7eb' }}>{c.operation}</div>
-                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>{c.case}</div>
-                <div style={{ display: 'flex', gap: 10, marginTop: 4, fontSize: 10 }}>
-                  {c.requires_count > 0 && (
-                    <span style={{ color: '#fbbf24' }}>{c.requires_count} requires</span>
-                  )}
-                  {c.ensures_count > 0 && (
-                    <span style={{ color: '#34d399' }}>{c.ensures_count} ensures</span>
-                  )}
-                  {c.source && <span style={{ color: '#4b5563', marginLeft: 'auto', fontFamily: 'monospace' }}>{c.source}</span>}
-                </div>
+    <div>
+      {contracts.map((c, i) => {
+        const clashes = conflictEdges
+          .filter((e) => e.source === c.key || e.target === c.key)
+          .map((e) => ({ other: e.source === c.key ? e.target : e.source, reason: e.label }));
+        return (
+          <article
+            key={c.key}
+            className={`proposition${selected === c.key ? ' selected' : ''}`}
+            onClick={() => onSelect(c)}
+          >
+            <p className="prop-statement">
+              <strong>Proposition 2.{i + 1}</strong>
+              <strong>&nbsp;({c.case}).</strong>
+              <span className="lead">&nbsp;For a {c.entity}, operation </span>
+              <code>{c.operation}</code>
+              <span className="lead">:</span>
+            </p>
+
+            <div className="prop-body">
+              <span className="prop-label">requires</span>
+              <div className="prop-values">
+                {c.requires.length ? (
+                  c.requires.map((r, j) => (
+                    <div className="val" key={j}>
+                      <code>{cond(r)}</code>
+                    </div>
+                  ))
+                ) : (
+                  <div className="val" style={{ color: 'var(--ink-60)', fontStyle: 'italic' }}>—</div>
+                )}
+              </div>
+
+              <span className="turnstile" aria-hidden="true">⊢</span>
+              <span className="prop-hr" />
+
+              <span className="prop-label">ensures</span>
+              <div className="prop-values">
+                {c.ensures.length ? (
+                  c.ensures.map((e, j) => (
+                    <div className="val" key={j}>
+                      <code>{cond(e)}</code>
+                    </div>
+                  ))
+                ) : (
+                  <div className="val" style={{ color: 'var(--ink-60)', fontStyle: 'italic' }}>—</div>
+                )}
+              </div>
+
+              {c.forbidden.length > 0 && (
+                <>
+                  <span className="prop-label red">forbidden</span>
+                  <div className="prop-values red">
+                    {c.forbidden.map((f, j) => (
+                      <div className="val" key={j}>
+                        <code>{forbidden(f)}</code>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              {c.preserves.length > 0 && (
+                <>
+                  <span className="prop-label">preserves</span>
+                  <div className="prop-values">
+                    <code>{c.preserves.join(', ')}</code>
+                  </div>
+                </>
+              )}
+              {c.assumes.length > 0 && (
+                <>
+                  <span className="prop-label">assumes</span>
+                  <div className="prop-values" style={{ fontStyle: 'italic' }}>
+                    {c.assumes.join('; ')}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {c.source && (
+              <p className="prop-intent">
+                <span className="src">{c.source}</span>
+              </p>
+            )}
+
+            {clashes.map((cl, j) => (
+              <div className="bot-callout" key={j}>
+                ⊥ In contradiction with{' '}
+                <button
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    onJump(cl.other);
+                  }}
+                >
+                  {caseOf(cl.other)}
+                </button>
+                {cl.reason ? ` — ${cl.reason}` : ''}
               </div>
             ))}
-          </div>
-        ))}
+          </article>
+        );
+      })}
+
+      <h3 style={{ marginTop: 34 }}>
+        <span className="secnum">§2.1</span>
+        Nomenclature
+      </h3>
+      <table className="nomen">
+        <thead>
+          <tr>
+            <th scope="col">Term</th>
+            <th scope="col">Meaning</th>
+          </tr>
+        </thead>
+        <tbody>
+          {NOMEN.map(([term, meaning]) => (
+            <tr key={term}>
+              <td className="term">{term}</td>
+              <td>{meaning}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

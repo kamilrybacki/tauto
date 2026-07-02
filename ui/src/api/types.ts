@@ -113,11 +113,34 @@ export interface ContractTestSuite {
   cases: TestCase[];
 }
 
+export interface DeadRule {
+  key: string;
+  field: string;
+  reason: string;
+}
+
+export interface ExampleOutcome {
+  case: string;
+  index: number;
+  status: 'pass' | 'fail' | 'underspecified';
+  message: string;
+}
+
+export interface GlossaryWarning {
+  contract: string;
+  category: string;
+  message: string;
+}
+
 export interface CheckResponse {
   compatible: boolean;
+  conformant?: boolean;
   proposed_contracts: number;
   parse_errors: number;
   conflicts: ConflictInfo[];
+  conformance?: ExampleOutcome[];
+  dead_rules?: DeadRule[];
+  glossary_warnings?: GlossaryWarning[];
   tests: {
     total_cases: number;
     proposed: ContractTestSuite[];
