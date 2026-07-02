@@ -121,13 +121,17 @@ export default function StateMachinePanel() {
       .catch((e: unknown) => setLoad({ kind: 'error', message: e instanceof Error ? e.message : String(e) }));
   }, []);
 
-  if (load.kind === 'loading') return <div className="sm-empty">Loading lifecycles…</div>;
-  if (load.kind === 'error') return <div className="sm-empty sm-error">Error: {load.message}</div>;
+  if (load.kind === 'loading')
+    return <div className="sm-empty"><p>Loading lifecycles…</p></div>;
+  if (load.kind === 'error')
+    return <div className="sm-empty sm-error"><p>Error: {load.message}</p></div>;
   if (load.data.length === 0)
     return (
       <div className="sm-empty">
-        No state fields declared. Mark an enum field as a <code>state</code> in the glossary
-        (a <code>states:</code> section) to see its lifecycle.
+        <p>
+          No state fields declared. Mark an enum field as a <code>state</code> in the glossary
+          (a <code>states:</code> section) to see its lifecycle.
+        </p>
       </div>
     );
 

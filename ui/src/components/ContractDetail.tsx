@@ -28,6 +28,7 @@ interface Props {
 export default function ContractDetail({ contract: c, onClose }: Props) {
   return (
     <div
+      className="contract-detail"
       style={{
         width: 300,
         minWidth: 300,

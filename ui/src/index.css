@@ -333,25 +333,59 @@ body {
 /* Narrow-viewport layout. The graph view stays a pan/zoom canvas; the header,
    nav, and content panels reflow so the app is usable on small screens. */
 @media (max-width: 640px) {
+  /* Header: brand + project + stats share one compact row; the tabs move to a
+     horizontally-scrollable strip below — no awkward multi-row wrapping. */
   .header {
     flex-wrap: wrap;
-    gap: 8px;
-    padding: 10px 12px;
+    gap: 8px 10px;
+    padding: 8px 12px 0;
+    align-items: baseline;
   }
-  .header h1 { flex-basis: 100%; }
-  .header .stats {
-    margin-left: 0;
+  .header h1 { font-size: 14px; }
+  .header .subtitle { display: none; }
+  .project-select { margin-left: 0; order: 1; }
+  .header .stats { order: 2; font-size: 11px; }
+
+  .nav {
     order: 3;
     flex-basis: 100%;
-  }
-  .nav {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
     gap: 6px;
+    /* Bleed to the screen edges so the strip reads as a scrollable rail. */
+    margin: 2px -12px 0;
+    padding: 4px 12px 8px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
-  /* Larger tap targets for touch. */
+  .nav::-webkit-scrollbar { display: none; }
   .nav button {
+    flex-shrink: 0;
     padding: 8px 14px;
     font-size: 13px;
+  }
+
+  /* Graph: the detail becomes a bottom sheet (inline width wins, so !important)
+     so the canvas keeps its full height behind it. */
+  .contract-detail {
+    position: fixed !important;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto !important;
+    min-width: 0 !important;
+    height: auto !important;
+    max-height: 68vh;
+    border-left: none !important;
+    border-top: 1px solid #334155;
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.5);
+    z-index: 20;
+  }
+  .legend {
+    bottom: 40px;
+    font-size: 10px;
+    padding: 6px 9px;
   }
 
   /* Check: stack vertically, giving the editor the larger share so the
@@ -722,6 +756,9 @@ body {
   display: flex; align-items: center; justify-content: center;
   height: 100%; color: #8b93a1; font-size: 13px; text-align: center; padding: 24px;
 }
+/* Wrap the message in a single flow element — putting prose + inline <code>
+   directly in a flex container makes each fragment a flex item (garbled order). */
+.sm-empty p { margin: 0; max-width: 34rem; line-height: 1.5; }
 .sm-empty.sm-error { color: #f87171; }
 .sm-empty code { font-family: monospace; color: #9ca3af; background: #1f2937; padding: 1px 5px; border-radius: 3px; }
 
