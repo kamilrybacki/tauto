@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use axum::extract::{Multipart, State};
+use axum::extract::{Multipart, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -26,12 +26,80 @@ use crate::scanner::{scan_glossary, scan_path};
 use crate::test_gen;
 
 struct ServerState {
-    contracts_path: PathBuf,
-    history_path: PathBuf,
+    /// slug → contracts directory. A single flat dir is the `default` project.
+    projects: std::collections::BTreeMap<String, PathBuf>,
+    default_project: String,
     history_lock: AsyncMutex<()>,
     /// Built once at startup and reused (keeps one pooled HTTP client). `None`
     /// when the SLM is not configured → `/translate` returns 503.
     slm_translator: Option<Arc<dyn crate::slm::SlmTranslator>>,
+}
+
+/// The `?project=<slug>` query param shared by the project-scoped endpoints.
+#[derive(Deserialize, Default)]
+struct ProjectQuery {
+    project: Option<String>,
+}
+
+impl ServerState {
+    /// Resolve a project's contracts directory. `None` → the default project.
+    /// Unknown slug → 404.
+    fn project_path(&self, slug: Option<&str>) -> Result<PathBuf, (StatusCode, Json<serde_json::Value>)> {
+        let slug = slug.filter(|s| !s.is_empty()).unwrap_or(&self.default_project);
+        self.projects.get(slug).cloned().ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": format!("unknown project: {slug}") })),
+            )
+        })
+    }
+
+    fn history_path(&self, contracts_dir: &Path) -> PathBuf {
+        contracts_dir.join("_history.json")
+    }
+}
+
+fn has_markdown_in(dir: &Path, recursive: bool) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.is_file() && p.extension().is_some_and(|x| x == "md") {
+            return true;
+        }
+        if recursive && p.is_dir() && has_markdown_in(&p, true) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Discover projects under `root`. If `root` has top-level `.md` files it is a
+/// single flat `default` project (back-compat). Otherwise each immediate subdir
+/// that contains contracts (recursively) is a project named by its dir.
+fn discover_projects(root: &Path) -> (std::collections::BTreeMap<String, PathBuf>, String) {
+    let mut projects = std::collections::BTreeMap::new();
+    if !has_markdown_in(root, false) {
+        if let Ok(entries) = std::fs::read_dir(root) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() && has_markdown_in(&p, true) {
+                    if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                        projects.insert(name.to_owned(), p.clone());
+                    }
+                }
+            }
+        }
+    }
+    if projects.is_empty() {
+        projects.insert("default".to_owned(), root.to_path_buf());
+        return (projects, "default".to_owned());
+    }
+    let default = if projects.contains_key("default") {
+        "default".to_owned()
+    } else {
+        projects.keys().next().cloned().unwrap()
+    };
+    (projects, default)
 }
 
 type ApiResult<T> = Result<Json<T>, (StatusCode, Json<serde_json::Value>)>;
@@ -90,8 +158,46 @@ fn contract_item(c: &ContractIR) -> ContractItem {
     }
 }
 
-async fn handle_contracts(State(state): State<Arc<ServerState>>) -> ApiResult<ContractsResponse> {
-    let (cs, _, files) = scan_path(&state.contracts_path).map_err(api_err)?;
+#[derive(Serialize)]
+struct ProjectInfo {
+    slug: String,
+    contracts: usize,
+    is_default: bool,
+}
+
+#[derive(Serialize)]
+struct ProjectsResponse {
+    projects: Vec<ProjectInfo>,
+    default_project: String,
+}
+
+async fn handle_projects(State(state): State<Arc<ServerState>>) -> ApiResult<ProjectsResponse> {
+    let state2 = Arc::clone(&state);
+    let projects = tokio::task::spawn_blocking(move || {
+        state2
+            .projects
+            .iter()
+            .map(|(slug, path)| {
+                let contracts = scan_path(path).map(|(cs, _, _)| cs.contracts.len()).unwrap_or(0);
+                ProjectInfo {
+                    slug: slug.clone(),
+                    contracts,
+                    is_default: *slug == state2.default_project,
+                }
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(api_err)?;
+    Ok(Json(ProjectsResponse { projects, default_project: state.default_project.clone() }))
+}
+
+async fn handle_contracts(
+    State(state): State<Arc<ServerState>>,
+    Query(pq): Query<ProjectQuery>,
+) -> ApiResult<ContractsResponse> {
+    let contracts_path = state.project_path(pq.project.as_deref())?;
+    let (cs, _, files) = scan_path(&contracts_path).map_err(api_err)?;
     let mut seen: HashSet<String> = HashSet::new();
     let items: Vec<ContractItem> = cs
         .contracts
@@ -224,8 +330,12 @@ fn build_graph(cs: &ContractSet) -> GraphResponse {
     GraphResponse { nodes, edges }
 }
 
-async fn handle_graph(State(state): State<Arc<ServerState>>) -> ApiResult<GraphResponse> {
-    let (cs, _, _) = scan_path(&state.contracts_path).map_err(api_err)?;
+async fn handle_graph(
+    State(state): State<Arc<ServerState>>,
+    Query(pq): Query<ProjectQuery>,
+) -> ApiResult<GraphResponse> {
+    let contracts_path = state.project_path(pq.project.as_deref())?;
+    let (cs, _, _) = scan_path(&contracts_path).map_err(api_err)?;
     Ok(Json(build_graph(&cs)))
 }
 
@@ -279,13 +389,14 @@ fn write_history(path: &Path, entries: &[HistoryEntry]) {
 
 async fn record_history(
     state: &Arc<ServerState>,
+    contracts_dir: &Path,
     filename: String,
     outcome: HistoryOutcome,
     contracts_count: usize,
     parse_errors: usize,
     conflicts: Vec<ConflictInfo>,
 ) {
-    let history_path = state.history_path.clone();
+    let history_path = state.history_path(contracts_dir);
     let _guard = state.history_lock.lock().await;
     let _ = tokio::task::spawn_blocking(move || {
         let timestamp_unix = SystemTime::now()
@@ -305,8 +416,11 @@ struct HistoryResponse {
     entries: Vec<HistoryEntry>,
 }
 
-async fn handle_history(State(state): State<Arc<ServerState>>) -> ApiResult<HistoryResponse> {
-    let history_path = state.history_path.clone();
+async fn handle_history(
+    State(state): State<Arc<ServerState>>,
+    Query(pq): Query<ProjectQuery>,
+) -> ApiResult<HistoryResponse> {
+    let history_path = state.history_path(&state.project_path(pq.project.as_deref())?);
     let entries = tokio::task::spawn_blocking(move || read_history(&history_path))
         .await
         .map_err(|e| api_err(e.to_string()))?;
@@ -334,8 +448,12 @@ struct ProofsResponse {
     build_stderr: String,
 }
 
-async fn handle_proofs(State(state): State<Arc<ServerState>>) -> ApiResult<ProofsResponse> {
-    let (cs, _, _) = scan_path(&state.contracts_path).map_err(api_err)?;
+async fn handle_proofs(
+    State(state): State<Arc<ServerState>>,
+    Query(pq): Query<ProjectQuery>,
+) -> ApiResult<ProofsResponse> {
+    let contracts_path = state.project_path(pq.project.as_deref())?;
+    let (cs, _, _) = scan_path(&contracts_path).map_err(api_err)?;
 
     if cs.contracts.is_empty() {
         return Ok(Json(ProofsResponse {
@@ -448,8 +566,10 @@ fn sanitize_filename(raw: &str) -> Option<String> {
 
 async fn handle_upload(
     State(state): State<Arc<ServerState>>,
+    Query(pq): Query<ProjectQuery>,
     mut multipart: Multipart,
 ) -> ApiResult<UploadResponse> {
+    let contracts_path = state.project_path(pq.project.as_deref())?;
     while let Some(field) = multipart.next_field().await.map_err(|e| api_err(e))? {
         if field.name() != Some("file") {
             continue;
@@ -463,13 +583,13 @@ async fn handle_upload(
         let content = std::str::from_utf8(&bytes)
             .map_err(|_| api_err("File must be valid UTF-8"))?;
 
-        let dest = state.contracts_path.join(&filename);
+        let dest = contracts_path.join(&filename);
         std::fs::write(&dest, content).map_err(api_err)?;
 
         let (cs, parse_errors, _) = scan_path(&dest).map_err(api_err)?;
 
         // Conflict gate: reject if this upload introduces a conflict against existing rules.
-        let (full_cs, _, _) = scan_path(&state.contracts_path).map_err(api_err)?;
+        let (full_cs, _, _) = scan_path(&contracts_path).map_err(api_err)?;
         let all_conflicts = find_conflict_candidates(&full_cs);
         if !all_conflicts.is_empty() {
             let uploaded_keys: HashSet<String> = cs
@@ -493,6 +613,7 @@ async fn handle_upload(
                     .collect();
                 record_history(
                     &state,
+                    &contracts_path,
                     filename.clone(),
                     HistoryOutcome::Rejected,
                     cs.contracts.len(),
@@ -516,6 +637,7 @@ async fn handle_upload(
 
         record_history(
             &state,
+            &contracts_path,
             filename.clone(),
             HistoryOutcome::Accepted,
             cs.contracts.len(),
@@ -563,9 +685,10 @@ struct CheckResponse {
 
 async fn handle_check(
     State(state): State<Arc<ServerState>>,
+    Query(pq): Query<ProjectQuery>,
     body: String,
 ) -> ApiResult<CheckResponse> {
-    let contracts_path = state.contracts_path.clone();
+    let contracts_path = state.project_path(pq.project.as_deref())?;
     // scan_path (disk I/O), conflict detection (CPU), and test-suite generation
     // (CPU) all run on a blocking thread so the async runtime is not stalled,
     // matching handle_history / handle_proofs.
@@ -702,6 +825,7 @@ struct TranslateBody {
 
 async fn handle_translate(
     State(state): State<Arc<ServerState>>,
+    Query(pq): Query<ProjectQuery>,
     headers: axum::http::HeaderMap,
     body: String,
 ) -> ApiResult<crate::slm::TranslationResult> {
@@ -752,7 +876,7 @@ async fn handle_translate(
 
     // Provide the glossary vocabulary as context so the SLM uses canonical names;
     // client-supplied context entries are merged on top (and win on conflict).
-    let path = state.contracts_path.clone();
+    let path = state.project_path(pq.project.as_deref())?;
     let glossary = tokio::task::spawn_blocking(move || scan_glossary(&path))
         .await
         .map_err(api_err)?
@@ -789,8 +913,11 @@ async fn handle_translate(
 
 // ── /api/v1/glossary ──────────────────────────────────────────────────────────
 
-async fn handle_glossary(State(state): State<Arc<ServerState>>) -> ApiResult<Glossary> {
-    let path = state.contracts_path.clone();
+async fn handle_glossary(
+    State(state): State<Arc<ServerState>>,
+    Query(pq): Query<ProjectQuery>,
+) -> ApiResult<Glossary> {
+    let path = state.project_path(pq.project.as_deref())?;
     tokio::task::spawn_blocking(move || scan_glossary(&path))
         .await
         .map_err(api_err)?
@@ -800,8 +927,11 @@ async fn handle_glossary(State(state): State<Arc<ServerState>>) -> ApiResult<Glo
 
 // ── /api/v1/lifecycle ─────────────────────────────────────────────────────────
 
-async fn handle_lifecycle(State(state): State<Arc<ServerState>>) -> ApiResult<Vec<StateCoverage>> {
-    let path = state.contracts_path.clone();
+async fn handle_lifecycle(
+    State(state): State<Arc<ServerState>>,
+    Query(pq): Query<ProjectQuery>,
+) -> ApiResult<Vec<StateCoverage>> {
+    let path = state.project_path(pq.project.as_deref())?;
     tokio::task::spawn_blocking(move || {
         let (cs, _, _) = scan_path(&path)?;
         let glossary = scan_glossary(&path)?;
@@ -850,8 +980,11 @@ fn file_sources(dir: &Path, glossary: &Glossary) -> (ObservedDomains, &'static s
 /// Source precedence: a live database (when configured) → a `_observed_states.json`
 /// descriptor in the contracts dir → none. Advisory: proposes completions, never
 /// mutates the glossary.
-async fn handle_reconcile(State(state): State<Arc<ServerState>>) -> ApiResult<ReconcileReport> {
-    let path = state.contracts_path.clone();
+async fn handle_reconcile(
+    State(state): State<Arc<ServerState>>,
+    Query(pq): Query<ProjectQuery>,
+) -> ApiResult<ReconcileReport> {
+    let path = state.project_path(pq.project.as_deref())?;
     tokio::task::spawn_blocking(move || {
         let glossary = scan_glossary(&path)?;
 
@@ -893,7 +1026,7 @@ async fn serve_inner(
     port: u16,
     ui_dist: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let history_path = contracts_path.join("_history.json");
+    let (projects, default_project) = discover_projects(&contracts_path);
     // Build the SLM translator once (reuses its pooled HTTP client). None when
     // unconfigured — /translate then 503s.
     let slm_translator: Option<Arc<dyn crate::slm::SlmTranslator>> =
@@ -904,9 +1037,10 @@ async fn serve_inner(
                 None
             }
         };
+    let projects_log: Vec<String> = projects.keys().cloned().collect();
     let state = Arc::new(ServerState {
-        contracts_path: contracts_path.clone(),
-        history_path,
+        projects,
+        default_project: default_project.clone(),
         history_lock: AsyncMutex::new(()),
         slm_translator,
     });
@@ -916,6 +1050,7 @@ async fn serve_inner(
 
     // No CORS middleware: the SPA is served by the same process (same-origin).
     let app = Router::new()
+        .route("/api/v1/projects", get(handle_projects))
         .route("/api/v1/contracts", get(handle_contracts))
         .route("/api/v1/contracts/upload", post(handle_upload))
         .route("/api/v1/graph", get(handle_graph))
@@ -933,7 +1068,7 @@ async fn serve_inner(
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
     eprintln!("tauto serve → http://localhost:{port}");
-    eprintln!("  contracts : {}", contracts_path.display());
+    eprintln!("  projects  : {} (default: {default_project})", projects_log.join(", "));
     eprintln!("  ui        : {}", ui_dist.display());
 
     axum::serve(listener, app).await?;

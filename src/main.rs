@@ -108,7 +108,8 @@ enum Commands {
     },
     /// Start a local web UI to browse business logic contracts
     Serve {
-        /// Directory or file containing contract markdown (recursive)
+        /// Contracts directory (a flat dir = one "default" project; a root whose
+        /// subdirs each hold contracts = multiple projects, switchable in the UI)
         path: PathBuf,
         /// Port to listen on
         #[arg(long, default_value = "4000")]

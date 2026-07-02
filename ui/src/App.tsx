@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { fetchContracts, fetchGraph, fetchHistory } from './api/client';
-import type { ContractsResponse, ContractItem, GraphResponse, HistoryEntry } from './api/types';
+import { fetchContracts, fetchGraph, fetchHistory, fetchProjects, setProject } from './api/client';
+import type { ContractsResponse, ContractItem, GraphResponse, HistoryEntry, ProjectInfo } from './api/types';
 import ContractGraph from './components/ContractGraph';
 import ContractList from './components/ContractList';
 import ContractDetail from './components/ContractDetail';
@@ -18,8 +18,25 @@ export default function App() {
   const [selected, setSelected] = useState<ContractItem | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>('graph');
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [project, setProjectSel] = useState<string>('');
 
+  // Load the project list once, then select the default.
   useEffect(() => {
+    fetchProjects()
+      .then((r) => {
+        setProjects(r.projects);
+        setProjectSel(r.default_project);
+      })
+      .catch((e: Error) => setError(e.message));
+  }, []);
+
+  // (Re)load all data whenever the selected project changes.
+  useEffect(() => {
+    if (!project) return;
+    setProject(project);
+    setContracts(null);
+    setSelected(null);
     Promise.all([fetchContracts(), fetchGraph(), fetchHistory()])
       .then(([c, g, h]) => {
         setContracts(c);
@@ -27,7 +44,7 @@ export default function App() {
         setHistory(h.entries);
       })
       .catch((e: Error) => setError(e.message));
-  }, []);
+  }, [project]);
 
   const handleSelectById = (id: string) => {
     const item = contracts?.items.find(c => c.key === id) ?? null;
@@ -58,6 +75,20 @@ export default function App() {
         <h1>
           tauto <span className="subtitle">— business logic explorer</span>
         </h1>
+        {projects.length > 1 && (
+          <select
+            className="project-select"
+            value={project}
+            onChange={(e) => setProjectSel(e.target.value)}
+            title="Project"
+          >
+            {projects.map((p) => (
+              <option key={p.slug} value={p.slug}>
+                {p.slug} ({p.contracts})
+              </option>
+            ))}
+          </select>
+        )}
         <div className="stats">
           {contracts.contracts} contract{contracts.contracts !== 1 ? 's' : ''} ·{' '}
           {contracts.files} file{contracts.files !== 1 ? 's' : ''}
@@ -106,9 +137,10 @@ export default function App() {
           />
         )}
         {view === 'history' && <HistoryPanel entries={history} />}
-        {view === 'proofs' && <ProofsPanel />}
+        {/* key={project} remounts the self-fetching panels on project switch */}
+        {view === 'proofs' && <ProofsPanel key={project} />}
         {view === 'check' && <CheckPanel />}
-        {view === 'states' && <StateMachinePanel />}
+        {view === 'states' && <StateMachinePanel key={project} />}
       </main>
     </div>
   );

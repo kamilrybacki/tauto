@@ -15,6 +15,26 @@ tauto serve ./rules --port 4000
 # open http://localhost:4000
 ```
 
+## Projects (serving multiple rule sets)
+
+`tauto serve <root>` supports **multiple projects**: if `root` has contract
+markdown directly it's a single implicit `default` project (back-compat); if
+`root`'s subdirectories each hold contracts, **each subdir is a project**,
+switchable from a dropdown in the UI.
+
+```
+rules-root/
+  team-a/          # → project "team-a"
+    _glossary.md
+    *.md
+  benchmark/       # → project "benchmark" (bundled example: examples/benchmark)
+    ...
+```
+
+`GET /api/v1/projects` lists them; every endpoint takes `?project=<slug>`
+(default = the `default` project, else the first). Each project has its own
+glossary, ODCS contracts, history, and proofs — fully isolated.
+
 ## What a contract looks like
 
 ````markdown

@@ -1,13 +1,48 @@
-import type { CheckResponse, ContractsResponse, GraphResponse, HistoryResponse, ProofsResponse, StateCoverage } from './types';
+import type {
+  CheckResponse,
+  ContractsResponse,
+  GraphResponse,
+  HistoryResponse,
+  ProjectsResponse,
+  ProofsResponse,
+  StateCoverage,
+} from './types';
+
+// The selected project is threaded onto every request as `?project=<slug>`.
+// Empty means "let the server pick the default" (and back-compat single-project).
+let currentProject = '';
+
+export function setProject(slug: string): void {
+  currentProject = slug;
+}
+
+export function getProject(): string {
+  return currentProject;
+}
+
+function withProject(path: string): string {
+  if (!currentProject) {
+    return path;
+  }
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}project=${encodeURIComponent(currentProject)}`;
+}
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+  const res = await fetch(withProject(path));
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`${res.status} ${res.statusText}${body ? ': ' + body : ''}`);
   }
   return res.json() as Promise<T>;
 }
+
+export const fetchProjects = (): Promise<ProjectsResponse> =>
+  // Not project-scoped — lists them.
+  fetch('/api/v1/projects').then((res) => {
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json() as Promise<ProjectsResponse>;
+  });
 
 export const fetchContracts = (): Promise<ContractsResponse> =>
   get<ContractsResponse>('/api/v1/contracts');
@@ -25,7 +60,7 @@ export const fetchLifecycle = (): Promise<StateCoverage[]> =>
   get<StateCoverage[]>('/api/v1/lifecycle');
 
 export async function checkRule(content: string): Promise<CheckResponse> {
-  const res = await fetch('/api/v1/check', {
+  const res = await fetch(withProject('/api/v1/check'), {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
     body: content,

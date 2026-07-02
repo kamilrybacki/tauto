@@ -125,6 +125,19 @@ export interface CheckResponse {
   };
 }
 
+// ── projects ────────────────────────────────────────────────────────────────────
+
+export interface ProjectInfo {
+  slug: string;
+  contracts: number;
+  is_default: boolean;
+}
+
+export interface ProjectsResponse {
+  projects: ProjectInfo[];
+  default_project: string;
+}
+
 // ── lifecycle (state machine) ──────────────────────────────────────────────────
 
 export interface StateTransition {
