@@ -94,7 +94,14 @@ mod tests {
 
     #[test]
     fn scan_flags_sorry_in_generated_workspace() {
-        let ws = generate_lean_workspace(&rich_set());
+        // The scanner flags `sorry` wherever it appears. Generated workspaces are
+        // now sorry-free (real proofs), so test the scanner on an explicit stub.
+        let ws = LeanWorkspace {
+            files: vec![lean_file(
+                "TautoContracts/contracts/CancelPaidOrder.lean",
+                "theorem t : True := by sorry\n",
+            )],
+        };
         let diags = scan_lean_workspace(&ws);
         assert!(!diags.is_empty());
     }
@@ -108,7 +115,12 @@ mod tests {
 
     #[test]
     fn scan_reports_file_path_in_diagnostic() {
-        let ws = generate_lean_workspace(&rich_set());
+        let ws = LeanWorkspace {
+            files: vec![lean_file(
+                "TautoContracts/contracts/CancelPaidOrder.lean",
+                "theorem t : True := by sorry\n",
+            )],
+        };
         let diags = scan_lean_workspace(&ws);
         assert!(diags.iter().all(|d| d.document_path.is_some()));
         assert!(diags
@@ -125,9 +137,14 @@ mod tests {
 
     #[test]
     fn scan_returns_one_diagnostic_per_sorry() {
-        let ws = generate_lean_workspace(&rich_set());
+        let ws = LeanWorkspace {
+            files: vec![lean_file(
+                "a.lean",
+                "theorem a : True := by sorry\ntheorem b : True := by sorry\n",
+            )],
+        };
         let diags = scan_lean_workspace(&ws);
-        assert_eq!(diags.len(), 2, "rich set has 2 theorems → 2 sorry stubs");
+        assert_eq!(diags.len(), 2, "two sorry stubs → two diagnostics");
     }
 
     #[test]

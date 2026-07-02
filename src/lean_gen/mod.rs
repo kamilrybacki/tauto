@@ -1,5 +1,6 @@
 pub mod io;
 pub mod lake;
+pub mod model;
 pub mod safety;
 pub mod workspace;
 

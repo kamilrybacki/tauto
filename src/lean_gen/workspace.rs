@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::contract_ir::{Condition, ContractIR, ContractSet, Expression, ExpressionValue};
+use crate::lean_gen::model::{self, Model};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LeanWorkspaceFile {
@@ -57,24 +58,61 @@ fn render_expr(expr: &Expression) -> String {
     }
 }
 
-fn theorem_stub(kind: &str, conditions: &[Condition], op_ident: &str) -> String {
-    let name = format!("{op_ident}_{kind}");
-    let mut lines = vec![
-        format!("theorem {name} :"),
-        "  -- TODO: formalize the following conditions".to_owned(),
+/// A contract file: satisfiability theorems for each modelable condition
+/// (`requires` and `ensures`). Each is a real, `sorry`-free proof that the
+/// condition is satisfiable. Assumes/preserves and unmodelable conditions are
+/// noted as comments. Original conditions are echoed as comments for context.
+fn contract_file(contract: &ContractIR, module_name: &str, model: &Model) -> LeanWorkspaceFile {
+    let mut body = vec![
+        "import TautoContracts.Model".to_owned(),
+        String::new(),
+        format!("namespace Tauto.Contracts.{module_name}"),
+        String::new(),
+        format!("-- {}/{}/{}", contract.entity, contract.operation, contract.case),
+        String::new(),
     ];
-    for cond in conditions {
-        lines.push(format!(
-            "  --   {} {} {}",
-            render_expr(&cond.left),
-            cond.operator,
-            render_expr(&cond.right)
-        ));
+
+    if !contract.assumes.is_empty() {
+        body.push(comment_block("Assumed preconditions", &contract.assumes));
     }
-    lines.push("  True := by".to_owned());
-    lines.push("  sorry".to_owned());
-    lines.push(String::new());
-    lines.join("\n")
+    if !contract.preserves.is_empty() {
+        body.push(comment_block("Preserved invariants", &contract.preserves));
+    }
+
+    let mut n = 0usize;
+    for (section, cond) in contract
+        .requires
+        .iter()
+        .map(|c| ("requires", c))
+        .chain(contract.ensures.iter().map(|c| ("ensures", c)))
+    {
+        let field = model::condition_field(cond).unwrap_or_else(|| "?".to_owned());
+        let name = format!("{}_sat_{n}", lean_ident(&field).to_lowercase());
+        match model::satisfiability(model, &contract.entity, &name, cond) {
+            Some(t) => {
+                body.push(format!("-- {section}: {}", cond_comment(cond)));
+                body.push(t.text);
+                body.push(String::new());
+            }
+            None => body.push(format!("-- {section} (not modelled): {}", cond_comment(cond))),
+        }
+        n += 1;
+    }
+    if n == 0 {
+        body.push("-- (no conditions to model)".to_owned());
+    }
+
+    body.push(format!("end Tauto.Contracts.{module_name}"));
+    body.push(String::new());
+
+    LeanWorkspaceFile {
+        path: format!("TautoContracts/contracts/{module_name}.lean"),
+        content: body.join("\n"),
+    }
+}
+
+fn cond_comment(cond: &Condition) -> String {
+    format!("{} {} {}", render_expr(&cond.left), cond.operator, render_expr(&cond.right))
 }
 
 fn comment_block(header: &str, items: &[String]) -> String {
@@ -86,40 +124,100 @@ fn comment_block(header: &str, items: &[String]) -> String {
     lines.join("\n")
 }
 
-fn contract_file(contract: &ContractIR, module_name: &str) -> LeanWorkspaceFile {
-    let op_ident = lean_ident(&contract.operation);
-    let mut body = vec![
-        format!("namespace Tauto.Contracts.{module_name}"),
-        String::new(),
-    ];
-    if !contract.assumes.is_empty() {
-        body.push(comment_block("Assumed preconditions", &contract.assumes));
-    }
-    if !contract.preserves.is_empty() {
-        body.push(comment_block("Preserved invariants", &contract.preserves));
-    }
-    if !contract.requires.is_empty() {
-        body.push(theorem_stub("requires", &contract.requires, &op_ident));
-    }
-    if !contract.ensures.is_empty() {
-        body.push(theorem_stub("ensures", &contract.ensures, &op_ident));
-    }
-    body.push(format!("end Tauto.Contracts.{module_name}"));
-    body.push(String::new());
-
-    // Path must match the import module `TautoContracts.contracts.<name>`: Lake
-    // resolves that to <root>/TautoContracts/contracts/<name>.lean, so the file
-    // lives under the library directory, not a top-level contracts/ dir.
+/// The domain-model file: inferred enum `inductive`s used by every other file.
+fn model_file(model: &Model) -> LeanWorkspaceFile {
     LeanWorkspaceFile {
-        path: format!("TautoContracts/contracts/{module_name}.lean"),
-        content: body.join("\n"),
+        path: "TautoContracts/Model.lean".to_owned(),
+        content: model::render_model(model),
     }
 }
 
-fn main_module_file(module_names: &[String]) -> LeanWorkspaceFile {
-    let mut lines = vec!["-- Auto-generated import index".to_owned(), String::new()];
+/// The conflicts file: for each same-(entity, operation) contract pair, prove
+/// the fields that are contradictorily constrained cannot both hold — turning
+/// the conflict heuristic into machine-checked theorems. Returns `None` when no
+/// pair yields a provable contradiction (so we don't emit an empty import).
+fn conflicts_file(contract_set: &ContractSet, model: &Model) -> Option<LeanWorkspaceFile> {
+    let mut body = vec![
+        "import TautoContracts.Model".to_owned(),
+        String::new(),
+        "namespace Tauto.Conflicts".to_owned(),
+        String::new(),
+    ];
+    let mut count = 0usize;
+
+    let contracts = &contract_set.contracts;
+    for i in 0..contracts.len() {
+        for j in (i + 1)..contracts.len() {
+            let (a, b) = (&contracts[i], &contracts[j]);
+            if a.entity != b.entity || a.operation != b.operation {
+                continue;
+            }
+            // Compare like positions only: guards (requires×requires) and
+            // outcomes (ensures×ensures). Crossing a pre-state guard with a
+            // post-state outcome on the same field name is meaningless.
+            //   - disjoint guards  → the rules are distinct transitions (no conflict)
+            //   - contradictory outcomes → a genuine conflict
+            for (section, a_conds, b_conds) in [
+                ("guards", &a.requires, &b.requires),
+                ("outcome", &a.ensures, &b.ensures),
+            ] {
+                let mut done_fields: Vec<String> = Vec::new();
+                for ca in a_conds {
+                    let Some(field) = model::condition_field(ca) else { continue };
+                    if done_fields.contains(&field) {
+                        continue;
+                    }
+                    for cb in b_conds {
+                        if model::condition_field(cb).as_deref() != Some(field.as_str()) {
+                            continue;
+                        }
+                        let name = format!(
+                            "{section}_{}_{}_{}",
+                            lean_ident(&a.case).to_lowercase(),
+                            lean_ident(&b.case).to_lowercase(),
+                            lean_ident(&field).to_lowercase()
+                        );
+                        if let Some(t) = model::conflict_theorem(model, &a.entity, &name, &field, ca, cb) {
+                            let note = if section == "guards" {
+                                "disjoint guards → distinct transitions, not a conflict"
+                            } else {
+                                "contradictory outcomes → conflict"
+                            };
+                            body.push(format!("-- {} vs {} on `{field}`: {note}", a.case, b.case));
+                            body.push(t.text);
+                            body.push(String::new());
+                            done_fields.push(field.clone());
+                            count += 1;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if count == 0 {
+        return None;
+    }
+    body.push("end Tauto.Conflicts".to_owned());
+    body.push(String::new());
+    Some(LeanWorkspaceFile {
+        path: "TautoContracts/Conflicts.lean".to_owned(),
+        content: body.join("\n"),
+    })
+}
+
+fn main_module_file(module_names: &[String], has_conflicts: bool) -> LeanWorkspaceFile {
+    let mut lines = vec![
+        "-- Auto-generated import index".to_owned(),
+        String::new(),
+        "import TautoContracts.Model".to_owned(),
+    ];
     for name in module_names {
         lines.push(format!("import TautoContracts.contracts.{name}"));
+    }
+    if has_conflicts {
+        lines.push("import TautoContracts.Conflicts".to_owned());
     }
     lines.push(String::new());
     LeanWorkspaceFile {
@@ -144,17 +242,22 @@ name = "TautoContracts"
 }
 
 pub fn generate_lean_workspace(contract_set: &ContractSet) -> LeanWorkspace {
+    let model = Model::infer(contract_set);
     let module_names = assign_module_names(&contract_set.contracts);
     let contract_files: Vec<LeanWorkspaceFile> = contract_set
         .contracts
         .iter()
         .zip(module_names.iter())
-        .map(|(c, name)| contract_file(c, name))
+        .map(|(c, name)| contract_file(c, name, &model))
         .collect();
-    let main = main_module_file(&module_names);
+    let conflicts = conflicts_file(contract_set, &model);
+    let main = main_module_file(&module_names, conflicts.is_some());
     let lake = lakefile();
-    let mut files = vec![lake, main];
+    let mut files = vec![lake, main, model_file(&model)];
     files.extend(contract_files);
+    if let Some(c) = conflicts {
+        files.push(c);
+    }
     LeanWorkspace { files }
 }
 
@@ -296,18 +399,46 @@ mod tests {
     }
 
     #[test]
-    fn rich_contract_produces_two_theorem_stubs() {
+    fn rich_contract_produces_real_satisfiability_theorems() {
         let ws = generate_lean_workspace(&rich_set());
         let f = ws.files.iter().find(|f| f.path.starts_with("TautoContracts/contracts/")).unwrap();
-        let sorry_count = f.content.matches("sorry").count();
-        assert_eq!(sorry_count, 2);
+        // One satisfiability theorem per modelable condition (1 requires + 1 ensures).
+        assert_eq!(f.content.matches("theorem ").count(), 2);
+        // Real proofs, not stubs.
+        assert!(!f.content.contains("sorry"));
+        assert!(f.content.contains("∃ x :"));
     }
 
     #[test]
-    fn theorem_stub_contains_sorry() {
+    fn generated_workspace_is_sorry_free() {
+        // The whole point of the rewrite: real, discharged proofs — no `sorry`
+        // and no vacuous `True` obligations anywhere in the workspace.
         let ws = generate_lean_workspace(&rich_set());
-        let f = ws.files.iter().find(|f| f.path.starts_with("TautoContracts/contracts/")).unwrap();
-        assert!(f.content.contains("sorry"));
+        for f in &ws.files {
+            assert!(!f.content.contains("sorry"), "unexpected sorry in {}", f.path);
+            assert!(!f.content.contains(": True"), "unexpected vacuous True in {}", f.path);
+        }
+    }
+
+    #[test]
+    fn contradictory_pair_yields_conflict_theorem() {
+        // Two same-op contracts with contradictory ensures on `status`.
+        let mk = |case: &str, val: &str| ContractIR {
+            case: case.to_owned(),
+            entity: "Order".to_owned(),
+            operation: "ship".to_owned(),
+            requires: vec![],
+            ensures: vec![cond("result.status", "==", val)],
+            forbidden: vec![],
+            preserves: vec![],
+            assumes: vec![],
+            source: None,
+        };
+        let ws = generate_lean_workspace(&ContractSet::new(vec![mk("A", "Shipped"), mk("B", "Rejected")]));
+        let conflicts = ws.files.iter().find(|f| f.path.ends_with("Conflicts.lean"));
+        let c = conflicts.expect("expected a Conflicts.lean");
+        assert!(c.content.contains("¬ (x = .Shipped ∧ x = .Rejected)"));
+        assert!(!c.content.contains("sorry"));
     }
 
     #[test]
