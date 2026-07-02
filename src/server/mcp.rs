@@ -149,7 +149,8 @@ to learn the domain vocabulary (entities, their field prefixes, enums, \
 operations) so a rule stays consistent, state_coverage to see each entity's \
 lifecycle (states, transitions, and unhandled/isolated states), and \
 reconcile_states to compare declared states against those observed in real \
-data (suggested completions).",
+data (suggested completions). For complex natural-language rules, translate_rule \
+turns prose into DSL (which you must review for faithfulness before check_rule).",
     })
 }
 
@@ -241,6 +242,18 @@ fn tool_definitions() -> Value {
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
+            "name": "translate_rule",
+            "title": "Translate prose to DSL (SLM)",
+            "description": "Translate a natural-language business rule into the tauto DSL using the configured SLM provider (default: a deterministic stub; a live model only when the server opts in). Returns DSL you MUST review for faithfulness before using — then pass it to check_rule. Writes nothing and proves nothing. For simple rules you can also author the DSL yourself; use this for complex prose.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "prose": { "type": "string", "description": "The natural-language business rule(s) to translate." }
+                },
+                "required": ["prose"]
+            }
+        },
+        {
             "name": "reconcile_states",
             "title": "Reconcile states against data",
             "description": "Compare the glossary's declared state domains against states observed in real data (a live database when configured, else a _observed_states.json descriptor). Per state field it returns observed_not_declared (states in the data the glossary is missing — suggested completions) and declared_not_observed (declared but not seen — future/unused or a typo). Advisory: it proposes completions, it does not modify the glossary. `source` reports where the observations came from (database/file/none).",
@@ -266,6 +279,7 @@ fn handle_tool_call(ctx: &Ctx, id: Value, req: &Value) -> Value {
         "get_glossary" => tool_get_glossary(ctx, &args),
         "state_coverage" => tool_state_coverage(ctx, &args),
         "reconcile_states" => tool_reconcile_states(ctx, &args),
+        "translate_rule" => tool_translate_rule(ctx, &args),
         other => Err(format!("unknown tool: {other}")),
     };
 
@@ -540,6 +554,29 @@ fn tool_state_coverage(ctx: &Ctx, _args: &Value) -> Result<String, String> {
     Ok(pretty(&json!({
         "coverage": reports,
         "note": "Per entity state field: declared states, the transitions the rules define, and gaps (no_incoming = candidate initial/unreachable, no_outgoing = candidate terminal, isolated = untouched → likely a missing rule, undeclared_states = used but not in the glossary → completable from data).",
+    })))
+}
+
+fn tool_translate_rule(ctx: &Ctx, args: &Value) -> Result<String, String> {
+    let prose = args
+        .get("prose")
+        .and_then(Value::as_str)
+        .ok_or("missing required argument: prose")?;
+    let (status, body) = ctx.post_text("/api/v1/translate", prose)?;
+    if status.as_u16() == 422 {
+        return Err(format!(
+            "translate rejected: {}",
+            body.get("error").and_then(Value::as_str).unwrap_or("empty prose")
+        ));
+    }
+    if !status.is_success() {
+        return Err(format!("translate failed: HTTP {status}: {}", pretty(&body)));
+    }
+    Ok(pretty(&json!({
+        "dsl": body.get("dsl"),
+        "provider": body.get("provider"),
+        "notes": body.get("notes"),
+        "next": "Review the DSL for faithfulness to the prose, correct if needed, then call check_rule with it. Nothing was saved.",
     })))
 }
 

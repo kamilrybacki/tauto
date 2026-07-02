@@ -37,6 +37,20 @@ preserves:
 ```
 ````
 
+## Prose → DSL (SLM front door)
+
+The hard part — turning natural-language rules into formal ones — is where an SLM
+helps. `POST /api/v1/translate` (MCP `translate_rule`) takes prose and returns
+**DSL** (not Lean): a legible contract you review for faithfulness, then feed to
+the verified pipeline (`/check` → proofs). The SLM never emits proofs and nothing
+is persisted — "it compiles" is not "it's faithful", so the DSL review is the
+checkpoint, and the deterministic DSL→Lean→lake path runs downstream.
+
+The provider is pluggable and **opt-in**: it defaults to a deterministic stub
+(offline, no model); a live model is used only when `TAUTO_SLM_PROVIDER=deepseek`
+and `DEEPSEEK_API_KEY` are set. For rules the DSL can't express, extend the
+DSL/IR rather than emit unverifiable Lean.
+
 ## Checking a proposed rule (for agents)
 
 `POST /api/v1/check` validates a proposed rule against the current set **without

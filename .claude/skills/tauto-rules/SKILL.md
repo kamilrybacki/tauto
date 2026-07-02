@@ -41,6 +41,11 @@ rules.
    term to add to the glossary, or a different existing term they mean. Do not
    invent thresholds, statuses, or field names the user did not give.
 
+   For long or intricate prose, you may call the MCP `translate_rule` tool to
+   get a first-pass DSL from the server's SLM — but **you still own faithfulness**:
+   read the returned DSL against the prose, correct it, and never treat it as
+   authoritative until reviewed. Simple rules: just author the DSL yourself.
+
 3. **Translate** to the DSL (grammar below), using the canonical entity name,
    its `aka` prefix for field paths, and declared enum members. If the entity
    has a **state** field (a determinant the glossary lists under `states:`, e.g.
