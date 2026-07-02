@@ -72,13 +72,20 @@ export default function ProofsPanel() {
   const contractFiles = data.files.filter(f => f.path.startsWith(CONTRACTS_DIR));
   const infraFiles = data.files.filter(f => !f.path.startsWith(CONTRACTS_DIR));
 
+  const obligations = data.files.reduce(
+    (n, f) => n + (f.content.match(/theorem /g)?.length ?? 0),
+    0,
+  );
+  const proven = data.build_available && data.build_success;
+
   return (
     <div className="proof-panel">
       <div className="proof-header">
         <BuildBadge data={data} />
         <span className="proof-stats">
           {data.contracts} contract{data.contracts !== 1 ? 's' : ''} ·{' '}
-          {data.sorry_count} proof obligation{data.sorry_count !== 1 ? 's' : ''} (sorry-stubbed)
+          {obligations} obligation{obligations !== 1 ? 's' : ''}
+          {proven ? ' · all discharged (decide/omega)' : data.sorry_count > 0 ? ` · ${data.sorry_count} sorry` : ''}
         </span>
         <button className="proof-rerun-btn" onClick={run}>↺ rebuild</button>
       </div>

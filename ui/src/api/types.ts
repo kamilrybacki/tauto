@@ -125,6 +125,25 @@ export interface CheckResponse {
   };
 }
 
+// ── lifecycle (state machine) ──────────────────────────────────────────────────
+
+export interface StateTransition {
+  from?: string;
+  to?: string;
+  contract: string;
+}
+
+export interface StateCoverage {
+  entity: string;
+  state_field: string;
+  states: string[];
+  transitions: StateTransition[];
+  no_incoming: string[];
+  no_outgoing: string[];
+  isolated: string[];
+  undeclared_states: string[];
+}
+
 // ── proofs ────────────────────────────────────────────────────────────────────
 
 export interface LeanFile {

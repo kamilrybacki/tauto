@@ -1,4 +1,4 @@
-import type { CheckResponse, ContractsResponse, GraphResponse, HistoryResponse, ProofsResponse } from './types';
+import type { CheckResponse, ContractsResponse, GraphResponse, HistoryResponse, ProofsResponse, StateCoverage } from './types';
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -20,6 +20,9 @@ export const fetchHistory = (): Promise<HistoryResponse> =>
 
 export const fetchProofs = (): Promise<ProofsResponse> =>
   get<ProofsResponse>('/api/v1/proofs');
+
+export const fetchLifecycle = (): Promise<StateCoverage[]> =>
+  get<StateCoverage[]>('/api/v1/lifecycle');
 
 export async function checkRule(content: string): Promise<CheckResponse> {
   const res = await fetch('/api/v1/check', {
