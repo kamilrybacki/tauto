@@ -49,6 +49,9 @@ RUN apt-get update \
 
 COPY --from=rust-builder /build/target/release/tauto /usr/local/bin/tauto
 COPY --from=ui-builder   /build/ui/dist              /opt/tauto/ui/dist
+# Bundle the capability benchmark so the deployment can seed it as an example
+# project (see the seed initContainer in the Helm chart).
+COPY examples/benchmark /opt/tauto/benchmark
 
 # No Lean toolchain in this image, so skip the startup lake availability check.
 ENV TAUTO_SKIP_LEAN_CHECK=1

@@ -10,6 +10,10 @@ image:
 replicas: 1
 port: 4000
 
+# Seed the bundled capability benchmark as an example project on start, and
+# migrate any pre-existing flat rules into a `default` project (idempotent).
+seedBenchmark: true
+
 # SLM prose→DSL translation is a REQUIRED capability (POST /api/v1/translate,
 # MCP translate_rule). The DeepSeek key is read from a Secret — never committed
 # here. Provision it out-of-band (this homelab: a SOPS SopsSecret in the private

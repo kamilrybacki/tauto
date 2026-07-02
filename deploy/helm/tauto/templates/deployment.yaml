@@ -19,6 +19,35 @@ spec:
         app: tauto
     spec:
       automountServiceAccountToken: false
+      {{- if .Values.seedBenchmark }}
+      # Idempotent seed: migrate any flat top-level rules into a `default`
+      # project, then drop in the bundled benchmark as an example project. Runs
+      # every start; safe to repeat (mv-once + no-clobber copy).
+      initContainers:
+        - name: seed-projects
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              if ls /contracts/*.md >/dev/null 2>&1; then
+                mkdir -p /contracts/default
+                mv /contracts/*.md /contracts/default/ 2>/dev/null || true
+                mv /contracts/_history.json /contracts/default/ 2>/dev/null || true
+                mv /contracts/*.odcs.yaml /contracts/default/ 2>/dev/null || true
+              fi
+              mkdir -p /contracts/benchmark
+              cp -rn /opt/tauto/benchmark/. /contracts/benchmark/ 2>/dev/null || true
+              echo "seed: projects = $(ls -d /contracts/*/ 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - mountPath: /contracts
+              name: contracts
+      {{- end }}
       containers:
         - name: tauto
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
