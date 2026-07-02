@@ -124,8 +124,10 @@ fn main_module_file(module_names: &[String]) -> LeanWorkspaceFile {
 }
 
 fn lakefile() -> LeanWorkspaceFile {
+    // Lake's lakefile.toml takes the package keys (name, version, …) at the top
+    // level — there is no `[package]` table. Recent Lake rejects the old form
+    // with "missing required key: name".
     let content = r#"# Auto-generated
-[package]
 name = "TautoContracts"
 version = "0.1.0"
 defaultTargets = ["TautoContracts"]
@@ -232,6 +234,19 @@ mod tests {
         let ws = generate_lean_workspace(&minimal_set());
         let lake = ws.files.iter().find(|f| f.path == "lakefile.toml").unwrap();
         assert!(lake.content.starts_with('#'), "TOML comments must use #, not --");
+    }
+
+    #[test]
+    fn lakefile_has_top_level_name_key() {
+        // Lake requires the package `name` at the document top level; a
+        // `[package]` table makes Lake fail with "missing required key: name".
+        let ws = generate_lean_workspace(&minimal_set());
+        let lake = ws.files.iter().find(|f| f.path == "lakefile.toml").unwrap();
+        assert!(
+            lake.content.lines().any(|l| l.trim_start().starts_with("name =")),
+            "lakefile.toml must declare a top-level name key"
+        );
+        assert!(!lake.content.contains("[package]"), "lakefile.toml must not use a [package] table");
     }
 
     #[test]
