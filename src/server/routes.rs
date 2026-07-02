@@ -702,12 +702,17 @@ async fn handle_translate(
 
     match result {
         Ok(r) => Ok(Json(r)),
-        // A missing/failed SLM provider is a configuration problem, not a bad
-        // request — surface it as 503 so the caller knows the SLM is required.
-        Err(e) => Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({ "error": format!("SLM translation unavailable: {e}") })),
-        )),
+        // A missing/failed SLM provider is a configuration/upstream problem, not
+        // a bad request — 503. Log the detail (which may include the upstream
+        // provider's error body) server-side; return a generic message so we
+        // don't leak upstream internals to the client.
+        Err(e) => {
+            eprintln!("translate: SLM provider error: {e}");
+            Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": "SLM translation provider unavailable" })),
+            ))
+        }
     }
 }
 
