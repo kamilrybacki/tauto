@@ -61,6 +61,52 @@ impl DeepSeekProvider {
         format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'))
     }
 
+    /// POST a single-message chat completion and return the assistant text.
+    /// Retries only *transient* failures — connection/timeout errors, 5xx, and
+    /// 429 — up to 3 attempts with short linear backoff. Never retries 4xx
+    /// (e.g. 402 Insufficient Balance, 401 bad key): those are permanent and
+    /// billable, so a retry would waste money without helping.
+    fn chat_completion(&self, prompt: &str, max_tokens: u32) -> Result<String, SlmError> {
+        let body = json!({
+            "model": self.model_id,
+            "messages": [{ "role": "user", "content": prompt }],
+            "temperature": 0,
+            "max_tokens": max_tokens,
+        });
+        let mut attempt = 0u32;
+        let parsed: serde_json::Value = loop {
+            attempt += 1;
+            match self.client.post(self.chat_url()).bearer_auth(&self.api_key).json(&body).send() {
+                Ok(r) if r.status().is_success() => {
+                    break r.json().map_err(|e| {
+                        SlmError::ProviderError(format!("response parse error: {e}"))
+                    })?;
+                }
+                Ok(r) => {
+                    let status = r.status();
+                    let transient = status.is_server_error() || status.as_u16() == 429;
+                    if transient && attempt < 3 {
+                        std::thread::sleep(std::time::Duration::from_millis(300 * attempt as u64));
+                        continue;
+                    }
+                    let text = r.text().unwrap_or_default();
+                    return Err(SlmError::ProviderError(format!("API error {status}: {text}")));
+                }
+                Err(e) => {
+                    if (e.is_timeout() || e.is_connect()) && attempt < 3 {
+                        std::thread::sleep(std::time::Duration::from_millis(300 * attempt as u64));
+                        continue;
+                    }
+                    return Err(SlmError::ProviderError(format!("request failed: {e}")));
+                }
+            }
+        };
+        parsed["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or_else(|| SlmError::ProviderError("no content in response".to_owned()))
+            .map(|s| s.to_owned())
+    }
+
     fn build_prompt(lean_stub: &str) -> String {
         format!(
             "You are a Lean 4 proof assistant. Replace each `sorry` in the following Lean 4 \
@@ -78,36 +124,7 @@ impl SlmCodeGenerator for DeepSeekProvider {
     ) -> Result<GeneratedArtifact, SlmError> {
         let lean_stub = request.context.get("lean_stub").cloned().unwrap_or_default();
         let prompt = Self::build_prompt(&lean_stub);
-
-        let body = json!({
-            "model": self.model_id,
-            "messages": [{ "role": "user", "content": prompt }],
-            "temperature": 0,
-            "max_tokens": 2048,
-        });
-
-        let response = self
-            .client
-            .post(self.chat_url())
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()
-            .map_err(|e| SlmError::ProviderError(format!("request failed: {e}")))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().unwrap_or_default();
-            return Err(SlmError::ProviderError(format!("API error {status}: {text}")));
-        }
-
-        let parsed: serde_json::Value = response
-            .json()
-            .map_err(|e| SlmError::ProviderError(format!("response parse error: {e}")))?;
-
-        let content = parsed["choices"][0]["message"]["content"]
-            .as_str()
-            .ok_or_else(|| SlmError::ProviderError("no content in response".to_owned()))?
-            .to_owned();
+        let content = self.chat_completion(&prompt, 2048)?;
 
         Ok(GeneratedArtifact {
             content,
@@ -129,36 +146,13 @@ impl super::translate::SlmTranslator for DeepSeekProvider {
         &self,
         request: &super::translate::TranslationRequest,
     ) -> Result<super::translate::TranslationResult, SlmError> {
+        // DSL blocks are short; cap output at 1024 to keep each translation cheap.
         let prompt = super::translate::build_translation_prompt(request);
-        let body = json!({
-            "model": self.model_id,
-            "messages": [{ "role": "user", "content": prompt }],
-            "temperature": 0,
-            // DSL blocks are short; cap output to keep each translation cheap.
-            "max_tokens": 1024,
-        });
-        let response = self
-            .client
-            .post(self.chat_url())
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()
-            .map_err(|e| SlmError::ProviderError(format!("request failed: {e}")))?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().unwrap_or_default();
-            return Err(SlmError::ProviderError(format!("API error {status}: {text}")));
-        }
-        let parsed: serde_json::Value = response
-            .json()
-            .map_err(|e| SlmError::ProviderError(format!("response parse error: {e}")))?;
-        let content = parsed["choices"][0]["message"]["content"]
-            .as_str()
-            .ok_or_else(|| SlmError::ProviderError("no content in response".to_owned()))?;
-        let dsl = super::translate::extract_dsl(content);
+        let content = self.chat_completion(&prompt, 1024)?;
+        let (dsl, notes) = super::translate::extract_dsl_checked(&content);
         Ok(super::translate::TranslationResult {
             dsl,
-            notes: vec![],
+            notes,
             provider: SlmProviderRef { name: "deepseek".to_owned(), model_id: self.model_id.clone() },
         })
     }

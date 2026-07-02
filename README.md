@@ -53,6 +53,13 @@ committed). The deterministic stub is available only for offline/testing via an
 explicit `TAUTO_SLM_PROVIDER=stub`. For rules the DSL can't express, extend the
 DSL/IR rather than emit unverifiable Lean.
 
+The endpoint and model are configurable, so tauto can point at **any
+OpenAI-compatible server** (a hosted API, or a local Ollama/vLLM/llama.cpp):
+`SLM_BASE_URL` is a **base** URL — tauto appends `/v1/chat/completions` (e.g.
+`SLM_BASE_URL=http://ollama:11434`) — and `DEEPSEEK_MODEL` picks the model
+(default `deepseek-chat`, the cheapest). Note this differs from `TAUTO_LAKE_URL`
+(the Lean build service), which is the **full** build URL, not a base.
+
 ## Checking a proposed rule (for agents)
 
 `POST /api/v1/check` validates a proposed rule against the current set **without

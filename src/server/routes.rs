@@ -678,6 +678,17 @@ async fn handle_translate(
             Json(serde_json::json!({ "error": "empty prose body" })),
         ));
     }
+    // Bound the prose: each translation is a paid upstream call, so reject
+    // oversized bodies rather than forwarding them to the SLM.
+    const MAX_PROSE_BYTES: usize = 16_384;
+    if body.len() > MAX_PROSE_BYTES {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({
+                "error": format!("prose too large ({} bytes; max {MAX_PROSE_BYTES})", body.len())
+            })),
+        ));
+    }
     // Provide the glossary vocabulary as context so the SLM uses canonical names.
     let path = state.contracts_path.clone();
     let glossary = tokio::task::spawn_blocking(move || scan_glossary(&path))

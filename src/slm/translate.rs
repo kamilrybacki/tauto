@@ -105,6 +105,23 @@ pub fn extract_dsl(content: &str) -> String {
     }
 }
 
+/// Like [`extract_dsl`], but also returns advisory notes. If the extracted text
+/// has no recognizable `case ` line, the model likely returned something other
+/// than the DSL (e.g. stray prose or Lean) — flag it so the caller reviews,
+/// upholding the prose→DSL-only boundary.
+pub fn extract_dsl_checked(content: &str) -> (String, Vec<String>) {
+    let dsl = extract_dsl(content);
+    let mut notes = Vec::new();
+    if !dsl.contains("case ") {
+        notes.push(
+            "SLM output contained no recognizable `case` block — review carefully; it may not \
+             be valid contract DSL."
+                .to_owned(),
+        );
+    }
+    (dsl, notes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,6 +160,14 @@ mod tests {
     fn extract_dsl_passes_through_bare_dsl() {
         let resp = "case A\nentity:\n  Order";
         assert_eq!(extract_dsl(resp), "case A\nentity:\n  Order");
+    }
+
+    #[test]
+    fn extract_dsl_checked_flags_non_dsl_output() {
+        let (_dsl, notes) = extract_dsl_checked("theorem x : True := by trivial");
+        assert!(notes.iter().any(|n| n.contains("no recognizable `case`")));
+        let (_dsl, notes) = extract_dsl_checked("```contract\ncase A\nentity:\n  Order\n```");
+        assert!(notes.is_empty());
     }
 
     #[test]

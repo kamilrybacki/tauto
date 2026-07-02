@@ -16,6 +16,7 @@
 use std::sync::Arc;
 
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use tokio::sync::Mutex as AsyncMutex;
@@ -67,9 +68,23 @@ async fn serve(port: u16) -> Result<(), Box<dyn std::error::Error>> {
 async fn handle_build(
     State(state): State<Arc<WorkerState>>,
     Json(req): Json<LakeBuildRequest>,
-) -> Json<LakeBuildResult> {
+) -> (StatusCode, Json<LakeBuildResult>) {
     // One build at a time — a memory-heavy lake build shouldn't run N-fold.
-    let _guard = state.build_lock.lock().await;
+    // try_lock (not lock): if a build is already running, fail fast with 503
+    // instead of queueing callers behind a 150s build past their own timeouts.
+    let _guard = match state.build_lock.try_lock() {
+        Ok(g) => g,
+        Err(_) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(LakeBuildResult {
+                    success: false,
+                    stdout: String::new(),
+                    stderr: "build worker busy — another build is in progress".to_owned(),
+                }),
+            )
+        }
+    };
     let workspace = LeanWorkspace { files: req.files };
 
     let result = tokio::task::spawn_blocking(move || build(workspace))
@@ -79,7 +94,7 @@ async fn handle_build(
             stdout: String::new(),
             stderr: format!("worker task failed: {e}"),
         });
-    Json(result)
+    (StatusCode::OK, Json(result))
 }
 
 /// Write the workspace to a temp dir and run `lake build`. Any failure is
