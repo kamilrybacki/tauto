@@ -671,11 +671,40 @@ fn compute_check(
 /// nothing and does not check/prove — the caller reviews the returned DSL and
 /// then POSTs it to /api/v1/check. This is the SLM front door to the verified
 /// pipeline; faithfulness is confirmed at DSL review, not by this call.
+/// Optional JSON body for /translate. Clients may POST either raw prose
+/// (`text/plain`) or `application/json` with extra context the SLM should use.
+#[derive(Deserialize)]
+struct TranslateBody {
+    prose: String,
+    #[serde(default)]
+    context: std::collections::BTreeMap<String, String>,
+}
+
 async fn handle_translate(
     State(state): State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
     body: String,
 ) -> ApiResult<crate::slm::TranslationResult> {
-    if body.trim().is_empty() {
+    // Accept JSON `{prose, context}` or raw prose (back-compat).
+    let is_json = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| ct.starts_with("application/json"));
+    let (prose, client_context) = if is_json {
+        match serde_json::from_str::<TranslateBody>(&body) {
+            Ok(b) => (b.prose, b.context),
+            Err(e) => {
+                return Err((
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(serde_json::json!({ "error": format!("invalid JSON body: {e}") })),
+                ))
+            }
+        }
+    } else {
+        (body, std::collections::BTreeMap::new())
+    };
+
+    if prose.trim().is_empty() {
         return Err((
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(serde_json::json!({ "error": "empty prose body" })),
@@ -684,11 +713,11 @@ async fn handle_translate(
     // Bound the prose: each translation is a paid upstream call, so reject
     // oversized bodies rather than forwarding them to the SLM.
     const MAX_PROSE_BYTES: usize = 16_384;
-    if body.len() > MAX_PROSE_BYTES {
+    if prose.len() > MAX_PROSE_BYTES {
         return Err((
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(serde_json::json!({
-                "error": format!("prose too large ({} bytes; max {MAX_PROSE_BYTES})", body.len())
+                "error": format!("prose too large ({} bytes; max {MAX_PROSE_BYTES})", prose.len())
             })),
         ));
     }
@@ -701,7 +730,8 @@ async fn handle_translate(
         ));
     };
 
-    // Provide the glossary vocabulary as context so the SLM uses canonical names.
+    // Provide the glossary vocabulary as context so the SLM uses canonical names;
+    // client-supplied context entries are merged on top (and win on conflict).
     let path = state.contracts_path.clone();
     let glossary = tokio::task::spawn_blocking(move || scan_glossary(&path))
         .await
@@ -713,9 +743,10 @@ async fn handle_translate(
             context.insert("glossary".to_owned(), g);
         }
     }
+    context.extend(client_context);
 
     let result = tokio::task::spawn_blocking(move || {
-        translator.translate(&crate::slm::TranslationRequest { prose: body, context })
+        translator.translate(&crate::slm::TranslationRequest { prose, context })
     })
     .await
     .map_err(api_err)?;
