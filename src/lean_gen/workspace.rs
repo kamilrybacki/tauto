@@ -207,7 +207,51 @@ fn conflicts_file(contract_set: &ContractSet, model: &Model) -> Option<LeanWorks
     })
 }
 
-fn main_module_file(module_names: &[String], has_conflicts: bool) -> LeanWorkspaceFile {
+/// The dead-rules file: for each rule whose requires can never all hold, prove
+/// the contradictory pair unsatisfiable (`∀ x, ¬(a ∧ b)`). `None` when no rule
+/// is dead.
+fn dead_rules_file(contract_set: &ContractSet, model: &Model) -> Option<LeanWorkspaceFile> {
+    let witnesses = crate::deadrule::find_dead_rule_witnesses(&contract_set.contracts);
+    if witnesses.is_empty() {
+        return None;
+    }
+    let mut body = vec![
+        "import TautoContracts.Model".to_owned(),
+        String::new(),
+        "namespace Tauto.DeadRules".to_owned(),
+        String::new(),
+    ];
+    let mut count = 0usize;
+    for w in &witnesses {
+        let c = &contract_set.contracts[w.contract_index];
+        let name = format!(
+            "dead_{}_{}",
+            lean_ident(&c.case).to_lowercase(),
+            lean_ident(&w.field).to_lowercase()
+        );
+        if let Some(t) = model::dead_rule_theorem(model, &c.entity, &name, &w.field, &w.a, &w.b) {
+            body.push(format!("-- {}: unsatisfiable requires on `{}` ({})", c.case, w.field, w.reason));
+            body.push(t.text);
+            body.push(String::new());
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return None;
+    }
+    body.push("end Tauto.DeadRules".to_owned());
+    body.push(String::new());
+    Some(LeanWorkspaceFile {
+        path: "TautoContracts/DeadRules.lean".to_owned(),
+        content: body.join("\n"),
+    })
+}
+
+fn main_module_file(
+    module_names: &[String],
+    has_conflicts: bool,
+    has_dead_rules: bool,
+) -> LeanWorkspaceFile {
     let mut lines = vec![
         "-- Auto-generated import index".to_owned(),
         String::new(),
@@ -218,6 +262,9 @@ fn main_module_file(module_names: &[String], has_conflicts: bool) -> LeanWorkspa
     }
     if has_conflicts {
         lines.push("import TautoContracts.Conflicts".to_owned());
+    }
+    if has_dead_rules {
+        lines.push("import TautoContracts.DeadRules".to_owned());
     }
     lines.push(String::new());
     LeanWorkspaceFile {
@@ -251,12 +298,16 @@ pub fn generate_lean_workspace(contract_set: &ContractSet) -> LeanWorkspace {
         .map(|(c, name)| contract_file(c, name, &model))
         .collect();
     let conflicts = conflicts_file(contract_set, &model);
-    let main = main_module_file(&module_names, conflicts.is_some());
+    let dead_rules = dead_rules_file(contract_set, &model);
+    let main = main_module_file(&module_names, conflicts.is_some(), dead_rules.is_some());
     let lake = lakefile();
     let mut files = vec![lake, main, model_file(&model)];
     files.extend(contract_files);
     if let Some(c) = conflicts {
         files.push(c);
+    }
+    if let Some(d) = dead_rules {
+        files.push(d);
     }
     LeanWorkspace { files }
 }

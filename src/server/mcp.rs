@@ -527,12 +527,13 @@ fn tool_check_rule(ctx: &Ctx, args: &Value) -> Result<String, String> {
         "conflicts": body.get("conflicts"),
         "glossary_warnings": body.get("glossary_warnings"),
         "conformance": body.get("conformance"),
+        "dead_rules": body.get("dead_rules"),
         "tests": {
             "total_cases": tests.get("total_cases"),
             "proposed": summarize(tests.get("proposed").unwrap_or(&json!([]))),
             "regression_suites": tests.get("regression").and_then(Value::as_array).map(|a| a.len()).unwrap_or(0),
         },
-        "note": "compatible = no conflicts with other rules. conformant = the rule agrees with its own examples (a `fail` means the formalization contradicts the stated intent — fix the rule or the example). Conflicts are heuristic; a Lean proof confirms them. Nothing was saved — dry run.",
+        "note": "compatible = no conflicts with other rules. conformant = the rule agrees with its own examples (a `fail` = the formalization contradicts the stated intent). dead_rules = preconditions that can never all hold (the rule can never fire — fix the guards). Conflicts are heuristic; Lean proofs confirm conflicts and dead rules. Nothing was saved — dry run.",
     });
     Ok(pretty(&out))
 }

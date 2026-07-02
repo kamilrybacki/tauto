@@ -556,6 +556,8 @@ struct CheckResponse {
     glossary_warnings: Vec<GlossaryWarning>,
     /// Per-example conformance outcomes (rule vs its own `examples`).
     conformance: Vec<crate::conformance::ExampleOutcome>,
+    /// Rules whose preconditions can never all hold (dead rules).
+    dead_rules: Vec<crate::deadrule::DeadRule>,
     tests: CheckTests,
 }
 
@@ -660,6 +662,9 @@ fn compute_check(
         .iter()
         .any(|o| o.status == crate::conformance::ConformanceStatus::Fail);
 
+    // Dead rules: preconditions that can never all hold (decidable).
+    let dead_rules = crate::deadrule::find_dead_rules(&proposed_cs.contracts);
+
     // Generate JSON test suites — no SLM involved.
     let proposed_suites = test_gen::generate_suite(&proposed_cs);
     let regression_suites = test_gen::generate_suite(&existing_cs);
@@ -674,6 +679,7 @@ fn compute_check(
         conflicts,
         glossary_warnings,
         conformance,
+        dead_rules,
         tests: CheckTests { total_cases, proposed: proposed_suites, regression: regression_suites },
     })
 }

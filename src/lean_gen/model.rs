@@ -334,6 +334,61 @@ pub fn condition_field(cond: &Condition) -> Option<String> {
     field_name(cond)
 }
 
+/// Render a single condition as a Lean prop over the bound variable `x`.
+fn dead_prop(kind: &FieldKind, cond: &Condition) -> Option<String> {
+    let op = cond.operator.as_str();
+    match kind {
+        FieldKind::Enum(_) => {
+            let v = is_enum_value(&cond.right.value)?;
+            match op {
+                "==" => Some(format!("x = .{v}")),
+                "!=" => Some(format!("x ≠ .{v}")),
+                _ => None,
+            }
+        }
+        FieldKind::Int => {
+            let ExpressionValue::Int(n) = &cond.right.value else { return None };
+            Some(format!("x {} {n}", lean_cmp(op)))
+        }
+        FieldKind::Bool => {
+            let ExpressionValue::Bool(b) = &cond.right.value else { return None };
+            match op {
+                "==" => Some(format!("x = {b}")),
+                "!=" => Some(format!("x ≠ {b}")),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// A machine-checked proof that a rule's two contradictory requires cannot both
+/// hold: `∀ x : T, ¬ (a ∧ b)`. The Rust dead-rule detector already decided the
+/// pair is unsatisfiable; this discharges it (omega for int, cases+simp for the
+/// finite enum/bool types — no Fintype/Mathlib needed).
+pub fn dead_rule_theorem(
+    model: &Model,
+    entity: &str,
+    name: &str,
+    field: &str,
+    a: &Condition,
+    b: &Condition,
+) -> Option<Theorem> {
+    let kind = model.kind(entity, field)?;
+    let pa = dead_prop(kind, a)?;
+    let pb = dead_prop(kind, b)?;
+    let (ty, tac) = match kind {
+        FieldKind::Int => ("Int".to_owned(), "by intro x ⟨h1, h2⟩; omega"),
+        FieldKind::Enum(_) => {
+            (enum_type_name(entity, field), "by intro x ⟨h1, h2⟩; cases x <;> simp_all")
+        }
+        FieldKind::Bool => ("Bool".to_owned(), "by intro x ⟨h1, h2⟩; cases x <;> simp_all"),
+    };
+    Some(Theorem {
+        name: name.to_owned(),
+        text: format!("theorem {name} : ∀ x : {ty}, ¬ ({pa} ∧ {pb}) := {tac}"),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
