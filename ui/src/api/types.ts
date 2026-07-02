@@ -24,6 +24,7 @@ export interface ContractItem {
   forbidden: ForbiddenOperation[];
   preserves: string[];
   assumes: string[];
+  intent?: string;
   source: string | null;
   requires_count: number;
   ensures_count: number;

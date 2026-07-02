@@ -136,6 +136,8 @@ struct ContractItem {
     forbidden: Vec<crate::contract_ir::ForbiddenOperation>,
     preserves: Vec<String>,
     assumes: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    intent: Option<String>,
     source: Option<String>,
     requires_count: usize,
     ensures_count: usize,
@@ -154,6 +156,7 @@ fn contract_item(c: &ContractIR) -> ContractItem {
         forbidden: c.forbidden.clone(),
         preserves: c.preserves.clone(),
         assumes: c.assumes.clone(),
+        intent: c.intent.clone(),
         source: c.source.as_ref().map(|s| format!("{}:{}", s.document_path, s.start_line)),
     }
 }

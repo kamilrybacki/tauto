@@ -109,9 +109,14 @@ export default function ContractList({ contracts, conflicts, selected, onSelect,
               )}
             </div>
 
-            {c.source && (
+            {(c.intent || c.source) && (
               <p className="prop-intent">
-                <span className="src">{c.source}</span>
+                {c.intent && (
+                  <>
+                    <span className="lbl">Intent.</span> {c.intent}{' '}
+                  </>
+                )}
+                {c.source && <span className="src">[{c.source}]</span>}
               </p>
             )}
 
