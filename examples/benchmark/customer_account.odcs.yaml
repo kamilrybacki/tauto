@@ -1,0 +1,15 @@
+kind: DataContract
+apiVersion: v3.1.0
+id: customer-account-state-contract
+status: active
+schema:
+  - name: CustomerAccount
+    physicalName: customer_accounts
+    properties:
+      - name: accountStatus
+        physicalName: account_status
+        logicalType: string
+        quality:
+          - metric: invalidValues
+            arguments:
+              validValues: [Prospect, Active, Suspended]

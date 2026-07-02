@@ -1,0 +1,15 @@
+kind: DataContract
+apiVersion: v3.1.0
+id: order-state-contract
+status: active
+schema:
+  - name: Order
+    physicalName: orders
+    properties:
+      - name: orderStatus
+        physicalName: order_status
+        logicalType: string
+        quality:
+          - metric: invalidValues
+            arguments:
+              validValues: [Draft, Submitted, Approved, ReadyToFulfill, Shipped, Delivered, Refunding, Cancelled]

@@ -1,0 +1,15 @@
+kind: DataContract
+apiVersion: v3.1.0
+id: payment-state-contract
+status: active
+schema:
+  - name: Payment
+    physicalName: payments
+    properties:
+      - name: paymentStatus
+        physicalName: payment_status
+        logicalType: string
+        quality:
+          - metric: invalidValues
+            arguments:
+              validValues: [Initiated, Authorized, Captured, Voided, Refunded, Failed, Reversed]
