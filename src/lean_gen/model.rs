@@ -15,7 +15,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::contract_ir::{Condition, ContractIR, ContractSet, ExpressionValue};
+use crate::contract_ir::{Condition, ContractSet, ExpressionValue};
 
 /// The inferred kind of a field, keyed below by `(entity, field-name)`.
 #[derive(Debug, Clone, PartialEq)]
@@ -36,12 +36,19 @@ pub struct Model {
 
 /// The bare field name of a condition's left side (`order.status` → `status`,
 /// `status` → `status`). `None` if the left side is not a field path.
+/// The field path with its leading instance/result prefix stripped, so
+/// `order.status` and `result.status` both key to `status`, but `billing.status`
+/// and `shipping.status` stay distinct. Using the full remaining path (not just
+/// the last segment) prevents false conflicts between different nested fields
+/// that happen to share a leaf name.
 fn field_name(cond: &Condition) -> Option<String> {
     let ExpressionValue::Str(path) = &cond.left.value else {
         return None;
     };
-    let name = path.rsplit('.').next().unwrap_or(path);
-    Some(name.to_owned())
+    match path.split_once('.') {
+        Some((_prefix, rest)) => Some(rest.to_owned()),
+        None => Some(path.clone()),
+    }
 }
 
 /// True for an identifier that starts uppercase — how the DSL distinguishes an
@@ -279,14 +286,21 @@ fn contradiction(a: &Condition, b: &Condition, kind: &FieldKind) -> Option<(Stri
             else {
                 return None;
             };
-            if oa == "==" && ob == "==" && ba != bb {
-                Some((
+            match (oa, ob) {
+                ("==", "==") if ba != bb => Some((
                     format!("x = {ba}"),
                     format!("x = {bb}"),
                     "by intro x ⟨h1, h2⟩; subst h1; exact absurd h2 (by decide)".to_owned(),
-                ))
-            } else {
-                None
+                )),
+                ("==", "!=") | ("!=", "==") if ba == bb => {
+                    let (eq, ne) = if oa == "==" { (ba, bb) } else { (bb, ba) };
+                    Some((
+                        format!("x = {eq}"),
+                        format!("x ≠ {ne}"),
+                        "by intro x ⟨h1, h2⟩; exact absurd h1 h2".to_owned(),
+                    ))
+                }
+                _ => None,
             }
         }
     }
@@ -323,7 +337,7 @@ pub fn condition_field(cond: &Condition) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contract_ir::{Expression, ExpressionValue};
+    use crate::contract_ir::{ContractIR, Expression, ExpressionValue};
 
     fn cond(left: &str, op: &str, right: ExpressionValue) -> Condition {
         Condition {

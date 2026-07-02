@@ -421,6 +421,29 @@ mod tests {
     }
 
     #[test]
+    fn distinct_nested_fields_do_not_false_conflict() {
+        // billing.status vs shipping.status share the leaf `status` but are
+        // different fields — must NOT emit a conflict theorem.
+        let mk = |case: &str, path: &str, val: &str| ContractIR {
+            case: case.to_owned(),
+            entity: "Order".to_owned(),
+            operation: "ship".to_owned(),
+            requires: vec![],
+            ensures: vec![cond(path, "==", val)],
+            forbidden: vec![],
+            preserves: vec![],
+            assumes: vec![],
+            source: None,
+        };
+        let ws = generate_lean_workspace(&ContractSet::new(vec![
+            mk("A", "result.billing.status", "Approved"),
+            mk("B", "result.shipping.status", "Rejected"),
+        ]));
+        // No Conflicts.lean because the fields differ.
+        assert!(ws.files.iter().all(|f| !f.path.ends_with("Conflicts.lean")));
+    }
+
+    #[test]
     fn contradictory_pair_yields_conflict_theorem() {
         // Two same-op contracts with contradictory ensures on `status`.
         let mk = |case: &str, val: &str| ContractIR {

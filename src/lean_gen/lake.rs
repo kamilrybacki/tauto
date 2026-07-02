@@ -94,6 +94,47 @@ pub fn run_lake_build(workspace_path: &Path) -> Result<LakeBuildResult, LakeErro
     })
 }
 
+/// Like [`run_lake_build`], but wraps the build in the `timeout` utility so a
+/// hung `lake build` cannot run forever. The lake worker uses this — it holds a
+/// serialization lock across the build, so an unbounded build would stall every
+/// later request. On timeout the process is killed (`timeout` exits 124) and a
+/// non-success result is returned. Requires coreutils `timeout` (present in the
+/// worker image); if absent, falls back to an unbounded build.
+pub fn run_lake_build_bounded(
+    workspace_path: &Path,
+    timeout_secs: u64,
+) -> Result<LakeBuildResult, LakeError> {
+    let output = Command::new("timeout")
+        .arg("--kill-after=10")
+        .arg(timeout_secs.to_string())
+        .arg("lake")
+        .arg("build")
+        .current_dir(workspace_path)
+        .output();
+    let output = match output {
+        Ok(o) => o,
+        // No `timeout` binary → fall back to an unbounded build rather than
+        // misreporting lake as missing.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return run_lake_build(workspace_path)
+        }
+        Err(e) => return Err(LakeError::Io(e)),
+    };
+    // `timeout` exits 124 when it had to terminate the command.
+    if output.status.code() == Some(124) {
+        return Ok(LakeBuildResult {
+            success: false,
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: format!("lake build exceeded {timeout_secs}s and was terminated"),
+        });
+    }
+    Ok(LakeBuildResult {
+        success: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

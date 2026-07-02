@@ -6,8 +6,8 @@ pub mod workspace;
 
 pub use io::{WriteError, write_lean_workspace};
 pub use lake::{
-    check_lean_available, run_lake_build, run_lake_build_remote, LakeBuildRequest, LakeBuildResult,
-    LakeError,
+    check_lean_available, run_lake_build, run_lake_build_bounded, run_lake_build_remote,
+    LakeBuildRequest, LakeBuildResult, LakeError,
 };
 pub use safety::scan_lean_workspace;
 pub use workspace::{LeanWorkspace, LeanWorkspaceFile, generate_lean_workspace};

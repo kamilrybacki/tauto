@@ -20,7 +20,23 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::lean_gen::{run_lake_build, LakeBuildRequest, LakeBuildResult, LeanWorkspace};
+use std::path::{Component, Path};
+
+use crate::lean_gen::{run_lake_build_bounded, LakeBuildRequest, LakeBuildResult, LeanWorkspace};
+
+/// Max seconds a single build may run before the worker terminates it (it holds
+/// the build lock, so an unbounded build would stall every later request).
+const BUILD_TIMEOUT_SECS: u64 = 150;
+
+/// Reject any workspace path that could escape the build tempdir. The `/build`
+/// body is attacker-controlled, so an absolute path or a `..` component must not
+/// be written (path traversal → arbitrary file write as the worker user).
+fn path_is_safe(p: &str) -> bool {
+    let path = Path::new(p);
+    !path.is_absolute()
+        && !p.is_empty()
+        && path.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+}
 
 struct WorkerState {
     /// Serializes builds — one `lake build` at a time.
@@ -69,7 +85,35 @@ async fn handle_build(
 /// Write the workspace to a temp dir and run `lake build`. Any failure is
 /// returned as a non-success result (never a panic), so the caller always gets
 /// a well-formed response.
+#[cfg(test)]
+mod tests {
+    use super::path_is_safe;
+
+    #[test]
+    fn rejects_traversal_and_absolute_paths() {
+        assert!(!path_is_safe("../../.ssh/authorized_keys"));
+        assert!(!path_is_safe("/etc/passwd"));
+        assert!(!path_is_safe("a/../../b"));
+        assert!(!path_is_safe(""));
+    }
+
+    #[test]
+    fn accepts_normal_relative_paths() {
+        assert!(path_is_safe("lakefile.toml"));
+        assert!(path_is_safe("TautoContracts/contracts/Foo.lean"));
+        assert!(path_is_safe("./TautoContracts.lean"));
+    }
+}
+
 fn build(workspace: LeanWorkspace) -> LakeBuildResult {
+    // Reject unsafe paths before writing anything (the request is untrusted).
+    if let Some(bad) = workspace.files.iter().find(|f| !path_is_safe(&f.path)) {
+        return LakeBuildResult {
+            success: false,
+            stdout: String::new(),
+            stderr: format!("rejected unsafe workspace path: {}", bad.path),
+        };
+    }
     let dir = match tempfile::tempdir() {
         Ok(d) => d,
         Err(e) => {
@@ -87,7 +131,7 @@ fn build(workspace: LeanWorkspace) -> LakeBuildResult {
             stderr: format!("could not write workspace: {e}"),
         };
     }
-    match run_lake_build(dir.path()) {
+    match run_lake_build_bounded(dir.path(), BUILD_TIMEOUT_SECS) {
         Ok(r) => r,
         Err(e) => LakeBuildResult {
             success: false,
