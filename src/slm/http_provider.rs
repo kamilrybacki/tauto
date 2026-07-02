@@ -29,11 +29,12 @@ impl DeepSeekProvider {
     }
 
     pub fn new_with_key(api_key: impl Into<String>) -> Self {
-        Self {
-            api_key: api_key.into(),
-            model_id: "deepseek-chat".to_owned(),
-            client: Client::new(),
-        }
+        // Default to the cheapest DeepSeek model — `deepseek-chat` (V3) is far
+        // cheaper than `deepseek-reasoner` (R1), and prose→DSL translation needs
+        // no reasoning tier. Overridable via DEEPSEEK_MODEL.
+        let model_id =
+            std::env::var("DEEPSEEK_MODEL").unwrap_or_else(|_| "deepseek-chat".to_owned());
+        Self { api_key: api_key.into(), model_id, client: Client::new() }
     }
 
     fn build_prompt(lean_stub: &str) -> String {
@@ -109,7 +110,8 @@ impl super::translate::SlmTranslator for DeepSeekProvider {
             "model": self.model_id,
             "messages": [{ "role": "user", "content": prompt }],
             "temperature": 0,
-            "max_tokens": 2048,
+            // DSL blocks are short; cap output to keep each translation cheap.
+            "max_tokens": 1024,
         });
         let response = self
             .client
