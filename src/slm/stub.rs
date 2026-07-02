@@ -44,6 +44,36 @@ impl SlmCodeGenerator for DeterministicStubProvider {
     }
 }
 
+impl super::translate::SlmTranslator for DeterministicStubProvider {
+    /// The stub does NOT translate — it scaffolds a contract with the prose
+    /// echoed as a comment and a note telling the caller to configure a real
+    /// SLM provider. Honest placeholder for tests and offline use.
+    fn translate(
+        &self,
+        request: &super::translate::TranslationRequest,
+    ) -> Result<super::translate::TranslationResult, SlmError> {
+        let prose_comment: String = request
+            .prose
+            .lines()
+            .map(|l| format!("#   {l}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let dsl = format!(
+            "```contract\ncase ProposedRule\nentity:\n  Entity\noperation:\n  operation\nrequires:\n  # TODO: derive preconditions from the prose below\nensures:\n  # TODO: derive postconditions\n# --- source prose (stub did not translate) ---\n{prose_comment}\n```\n"
+        );
+        Ok(super::translate::TranslationResult {
+            dsl,
+            notes: vec![
+                "deterministic stub: no real translation performed. Configure an SLM \
+                 provider (TAUTO_SLM_PROVIDER=deepseek and DEEPSEEK_API_KEY) for real \
+                 prose→DSL translation."
+                    .to_owned(),
+            ],
+            provider: self.ref_.clone(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

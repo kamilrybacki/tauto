@@ -95,6 +95,49 @@ impl SlmCodeGenerator for DeepSeekProvider {
     }
 }
 
+impl super::translate::SlmTranslator for DeepSeekProvider {
+    /// Translate prose → DSL. NOTE: this performs a live API call; it is only
+    /// reached when the caller has explicitly selected the DeepSeek provider
+    /// (config + key). Tests never invoke this — they test the stub and the
+    /// pure prompt/parse helpers.
+    fn translate(
+        &self,
+        request: &super::translate::TranslationRequest,
+    ) -> Result<super::translate::TranslationResult, SlmError> {
+        let prompt = super::translate::build_translation_prompt(request);
+        let body = json!({
+            "model": self.model_id,
+            "messages": [{ "role": "user", "content": prompt }],
+            "temperature": 0,
+            "max_tokens": 2048,
+        });
+        let response = self
+            .client
+            .post("https://api.deepseek.com/v1/chat/completions")
+            .bearer_auth(&self.api_key)
+            .json(&body)
+            .send()
+            .map_err(|e| SlmError::ProviderError(format!("request failed: {e}")))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().unwrap_or_default();
+            return Err(SlmError::ProviderError(format!("API error {status}: {text}")));
+        }
+        let parsed: serde_json::Value = response
+            .json()
+            .map_err(|e| SlmError::ProviderError(format!("response parse error: {e}")))?;
+        let content = parsed["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or_else(|| SlmError::ProviderError("no content in response".to_owned()))?;
+        let dsl = super::translate::extract_dsl(content);
+        Ok(super::translate::TranslationResult {
+            dsl,
+            notes: vec![],
+            provider: SlmProviderRef { name: "deepseek".to_owned(), model_id: self.model_id.clone() },
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

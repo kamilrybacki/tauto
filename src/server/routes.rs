@@ -661,6 +661,47 @@ fn compute_check(
     })
 }
 
+// ── /api/v1/translate ─────────────────────────────────────────────────────────
+
+/// Translate prose business rules into the DSL via the configured SLM provider
+/// (default: deterministic stub; live SLM only when opted in via env). Writes
+/// nothing and does not check/prove — the caller reviews the returned DSL and
+/// then POSTs it to /api/v1/check. This is the SLM front door to the verified
+/// pipeline; faithfulness is confirmed at DSL review, not by this call.
+async fn handle_translate(
+    State(state): State<Arc<ServerState>>,
+    body: String,
+) -> ApiResult<crate::slm::TranslationResult> {
+    if body.trim().is_empty() {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({ "error": "empty prose body" })),
+        ));
+    }
+    // Provide the glossary vocabulary as context so the SLM uses canonical names.
+    let path = state.contracts_path.clone();
+    let glossary = tokio::task::spawn_blocking(move || scan_glossary(&path))
+        .await
+        .map_err(api_err)?
+        .map_err(api_err)?;
+    let mut context = std::collections::BTreeMap::new();
+    if !glossary.is_empty() {
+        if let Ok(g) = serde_json::to_string(&glossary) {
+            context.insert("glossary".to_owned(), g);
+        }
+    }
+
+    let result = tokio::task::spawn_blocking(move || {
+        let translator = crate::slm::translator_from_env();
+        translator.translate(&crate::slm::TranslationRequest { prose: body, context })
+    })
+    .await
+    .map_err(api_err)?
+    .map_err(|e| api_err(e.to_string()))?;
+
+    Ok(Json(result))
+}
+
 // ── /api/v1/glossary ──────────────────────────────────────────────────────────
 
 async fn handle_glossary(State(state): State<Arc<ServerState>>) -> ApiResult<Glossary> {
@@ -785,6 +826,7 @@ async fn serve_inner(
         .route("/api/v1/history", get(handle_history))
         .route("/api/v1/proofs", get(handle_proofs))
         .route("/api/v1/check", post(handle_check))
+        .route("/api/v1/translate", post(handle_translate))
         .route("/api/v1/glossary", get(handle_glossary))
         .route("/api/v1/lifecycle", get(handle_lifecycle))
         .route("/api/v1/reconcile", get(handle_reconcile))
