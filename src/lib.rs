@@ -1,3 +1,4 @@
+pub mod conformance;
 pub mod contract_ir;
 pub mod contract_parser;
 pub mod glossary;

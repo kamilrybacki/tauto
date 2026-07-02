@@ -521,16 +521,18 @@ fn tool_check_rule(ctx: &Ctx, args: &Value) -> Result<String, String> {
     let tests = body.get("tests").cloned().unwrap_or(json!({}));
     let out = json!({
         "compatible": body.get("compatible"),
+        "conformant": body.get("conformant"),
         "proposed_contracts": body.get("proposed_contracts"),
         "parse_errors": body.get("parse_errors"),
         "conflicts": body.get("conflicts"),
         "glossary_warnings": body.get("glossary_warnings"),
+        "conformance": body.get("conformance"),
         "tests": {
             "total_cases": tests.get("total_cases"),
             "proposed": summarize(tests.get("proposed").unwrap_or(&json!([]))),
             "regression_suites": tests.get("regression").and_then(Value::as_array).map(|a| a.len()).unwrap_or(0),
         },
-        "note": "Conflicts are heuristic candidates; a Lean proof confirms them. glossary_warnings are advisory vocabulary checks. Nothing was saved — this was a dry run.",
+        "note": "compatible = no conflicts with other rules. conformant = the rule agrees with its own examples (a `fail` means the formalization contradicts the stated intent — fix the rule or the example). Conflicts are heuristic; a Lean proof confirms them. Nothing was saved — dry run.",
     });
     Ok(pretty(&out))
 }

@@ -327,7 +327,7 @@ mod tests {
             forbidden: vec![],
             preserves: vec![],
             assumes: vec![],
-            source: None,
+            intent: None, examples: Vec::new(), source: None,
         }])
     }
 
@@ -433,7 +433,7 @@ mod tests {
             forbidden: vec![],
             preserves: vec![],
             assumes: vec![],
-            source: None,
+            intent: None, examples: Vec::new(), source: None,
         };
         let ws = generate_lean_workspace(&ContractSet::new(vec![
             mk("A", "result.billing.status", "Approved"),
@@ -455,7 +455,7 @@ mod tests {
             forbidden: vec![],
             preserves: vec![],
             assumes: vec![],
-            source: None,
+            intent: None, examples: Vec::new(), source: None,
         };
         let ws = generate_lean_workspace(&ContractSet::new(vec![mk("A", "Shipped"), mk("B", "Rejected")]));
         let conflicts = ws.files.iter().find(|f| f.path.ends_with("Conflicts.lean"));
@@ -528,7 +528,7 @@ mod tests {
             forbidden: vec![],
             preserves: vec!["order.history.size > 0".to_owned()],
             assumes: vec![],
-            source: None,
+            intent: None, examples: Vec::new(), source: None,
         }]);
         let ws = generate_lean_workspace(&cs);
         let f = ws.files.iter().find(|f| f.path.starts_with("TautoContracts/contracts/")).unwrap();
@@ -547,7 +547,7 @@ mod tests {
             forbidden: vec![],
             preserves: vec![],
             assumes: vec!["payment.verified == true".to_owned()],
-            source: None,
+            intent: None, examples: Vec::new(), source: None,
         }]);
         let ws = generate_lean_workspace(&cs);
         let f = ws.files.iter().find(|f| f.path.starts_with("TautoContracts/contracts/")).unwrap();

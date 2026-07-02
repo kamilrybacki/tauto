@@ -545,12 +545,17 @@ struct CheckTests {
 #[derive(Serialize)]
 struct CheckResponse {
     compatible: bool,
+    /// True when no example contradicts its rule (correctness vs stated intent).
+    /// Distinct from `compatible` (which is about conflicts with other rules).
+    conformant: bool,
     proposed_contracts: usize,
     parse_errors: usize,
     conflicts: Vec<ConflictInfo>,
     /// Advisory glossary findings for the proposed rule (unknown entity/field,
     /// cross-entity references, etc.). Never blocks — informational only.
     glossary_warnings: Vec<GlossaryWarning>,
+    /// Per-example conformance outcomes (rule vs its own `examples`).
+    conformance: Vec<crate::conformance::ExampleOutcome>,
     tests: CheckTests,
 }
 
@@ -648,6 +653,13 @@ fn compute_check(
         })
         .collect();
 
+    // Conformance: does each proposed rule agree with its own examples? (rule
+    // vs stated intent — correctness, distinct from cross-rule compatibility).
+    let conformance = crate::conformance::check_examples(&proposed_cs.contracts);
+    let conformant = !conformance
+        .iter()
+        .any(|o| o.status == crate::conformance::ConformanceStatus::Fail);
+
     // Generate JSON test suites — no SLM involved.
     let proposed_suites = test_gen::generate_suite(&proposed_cs);
     let regression_suites = test_gen::generate_suite(&existing_cs);
@@ -656,10 +668,12 @@ fn compute_check(
 
     Ok(CheckResponse {
         compatible: conflicts.is_empty(),
+        conformant,
         proposed_contracts: proposed_cs.contracts.len(),
         parse_errors,
         conflicts,
         glossary_warnings,
+        conformance,
         tests: CheckTests { total_cases, proposed: proposed_suites, regression: regression_suites },
     })
 }

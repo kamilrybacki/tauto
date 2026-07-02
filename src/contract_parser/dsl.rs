@@ -1,11 +1,13 @@
 use crate::contract_ir::{
-    Condition, ContractIR, Diagnostic, Expression, ExpressionValue, ForbiddenOperation,
+    Condition, ContractIR, Diagnostic, Expression, ExpressionValue, ForbiddenOperation, RuleExample,
 };
 
 use super::markdown::ContractBlock;
 
-const ALLOWED_SECTIONS: &[&str] =
-    &["entity", "operation", "requires", "ensures", "forbidden", "preserves", "assumes"];
+const ALLOWED_SECTIONS: &[&str] = &[
+    "entity", "operation", "requires", "ensures", "forbidden", "preserves", "assumes", "intent",
+    "examples",
+];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseResult {
@@ -102,6 +104,20 @@ pub fn parse_contract_block(block: &ContractBlock) -> ParseResult {
         .map(|items| items.iter().map(|(_, v)| v.clone()).collect())
         .unwrap_or_default();
 
+    // Free-text intent: join the section's lines.
+    let intent: Option<String> = sections.get("intent").and_then(|items| {
+        if items.is_empty() {
+            None
+        } else {
+            Some(items.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>().join(" "))
+        }
+    });
+
+    let examples: Vec<RuleExample> = sections
+        .get("examples")
+        .map(|items| items.iter().filter_map(|i| parse_example(i, doc, &mut diagnostics)).collect())
+        .unwrap_or_default();
+
     if !diagnostics.is_empty() || case_name.is_none() || entity.is_none() || operation.is_none() {
         return ParseResult { contract: None, diagnostics };
     }
@@ -116,9 +132,88 @@ pub fn parse_contract_block(block: &ContractBlock) -> ParseResult {
             forbidden,
             preserves,
             assumes,
+            intent,
+            examples,
             source: Some(block.source.clone()),
         }),
         diagnostics: vec![],
+    }
+}
+
+/// Parse one `examples:` item. Grammar (semicolon-separated clauses):
+///   given: field=Value, field=N; then: field=Value
+///   given: field=Value; applies: false
+fn parse_example(
+    item: &(u32, String),
+    doc: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<RuleExample> {
+    let (line, text) = item;
+    // Strip the list marker: `- given: ...` → `given: ...`.
+    let text = text.trim_start().trim_start_matches('-').trim();
+    let mut given = std::collections::BTreeMap::new();
+    let mut then = std::collections::BTreeMap::new();
+    let mut applies = true;
+    let mut applies_explicit = false;
+
+    for clause in text.split(';') {
+        let clause = clause.trim();
+        if clause.is_empty() {
+            continue;
+        }
+        let Some((key, rest)) = clause.split_once(':') else {
+            diagnostics.push(Diagnostic::parse_error(
+                format!("Malformed example clause (expected `key: ...`): {clause}"),
+                Some(doc.to_owned()),
+                Some(*line),
+            ));
+            return None;
+        };
+        match key.trim() {
+            "given" => parse_assignments(rest, &mut given),
+            "then" => {
+                parse_assignments(rest, &mut then);
+                applies = true;
+            }
+            "applies" => {
+                applies = rest.trim() == "true";
+                applies_explicit = true;
+            }
+            other => {
+                diagnostics.push(Diagnostic::parse_error(
+                    format!("Unknown example clause `{other}` (use given/then/applies)"),
+                    Some(doc.to_owned()),
+                    Some(*line),
+                ));
+                return None;
+            }
+        }
+    }
+
+    if given.is_empty() {
+        diagnostics.push(Diagnostic::parse_error(
+            format!("Example has no `given` state: {text}"),
+            Some(doc.to_owned()),
+            Some(*line),
+        ));
+        return None;
+    }
+    // `then` present implies the rule applies unless applies was set false.
+    if !then.is_empty() && !applies_explicit {
+        applies = true;
+    }
+    Some(RuleExample { given, then, applies })
+}
+
+/// Parse `field=Value, field=N` into a map of typed values.
+fn parse_assignments(raw: &str, into: &mut std::collections::BTreeMap<String, ExpressionValue>) {
+    for pair in raw.split(',') {
+        if let Some((k, v)) = pair.split_once('=') {
+            let k = k.trim();
+            if !k.is_empty() {
+                into.insert(k.to_owned(), parse_expression(v.trim()).value);
+            }
+        }
     }
 }
 
@@ -349,6 +444,33 @@ ensures:
         let result = parse_contract_block(&blocks[0]);
         assert!(result.contract.is_some());
         assert_eq!(result.contract.unwrap().case, "RoundTrip");
+    }
+
+    #[test]
+    fn parse_intent_and_examples() {
+        let raw = "\
+case ShipPaidOrder
+entity:
+  Order
+operation:
+  ship
+requires:
+  order.status == Paid
+ensures:
+  result.status == Shipped
+intent:
+  A paid order should ship.
+examples:
+  - given: status=Paid; then: status=Shipped
+  - given: status=Unpaid; applies: false
+";
+        let c = parse_contract_block(&block(raw)).contract.unwrap();
+        assert_eq!(c.intent.as_deref(), Some("A paid order should ship."));
+        assert_eq!(c.examples.len(), 2);
+        assert_eq!(c.examples[0].given.get("status"), Some(&ExpressionValue::Str("Paid".into())));
+        assert_eq!(c.examples[0].then.get("status"), Some(&ExpressionValue::Str("Shipped".into())));
+        assert!(c.examples[0].applies);
+        assert!(!c.examples[1].applies);
     }
 
     #[test]

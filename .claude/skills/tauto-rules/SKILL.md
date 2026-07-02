@@ -105,6 +105,20 @@ assumes:
 | `forbidden`  | Operation calls that must not occur, e.g. `disburseFunds(loan.id)`. |
 | `preserves`  | Field paths whose value must be unchanged. |
 | `assumes`    | Ambient facts taken as given (not checked). |
+| `intent`     | One-line restatement of what the rule is meant to do (the human intent). |
+| `examples`   | Concrete cases the rule must handle — checked against the rule. |
+
+**Examples** capture the author's intent as checkable cases. Each is one
+`- ` line with semicolon-separated clauses; use **bare** field names:
+
+```
+examples:
+  - given: status=Paid; then: status=Shipped     # rule fires, this is the outcome
+  - given: status=Unpaid; applies: false          # rule must NOT fire here
+```
+
+Elicit an example or two from the user (don't invent them) — they turn "is this
+rule correct?" into a checkable question and double as test cases.
 
 **Conditions** compare a field path to a typed literal:
 
@@ -138,6 +152,12 @@ If the tauto MCP server is not connected, it is provided by this repo:
 
 - `compatible` — `true` if the rule introduces **no** conflict with existing
   rules; `false` otherwise.
+- `conformant` + `conformance[]` — whether the rule agrees with its own
+  `examples`. Each outcome is `{ case, index, status, message }` with status
+  `pass` / `fail` / `underspecified`. A **`fail`** means the formalization
+  contradicts the stated intent (e.g. the example expects `Cancelled` but the
+  rule ensures `Shipped`) — fix the rule or the example, don't ignore it.
+  `underspecified` = the example didn't give enough state to decide.
 - `conflicts[]` — each `{ key_a, key_b, reason }` names two contract keys
   (`entity/operation/case`) that cannot both hold and why (e.g. *"`result.status`
   cannot be both `Approved` and `Rejected`"*).

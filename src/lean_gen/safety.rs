@@ -84,7 +84,7 @@ mod tests {
             forbidden: vec![],
             preserves: vec![],
             assumes: vec![],
-            source: None,
+            intent: None, examples: Vec::new(), source: None,
         }])
     }
 

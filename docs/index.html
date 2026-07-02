@@ -495,7 +495,7 @@ tauto serve ./rules --port 4000
     <tr><td><code>GET /api/v1/history</code></td><td>Chronological log of upload attempts and their outcomes.</td></tr>
     <tr><td><code>GET /api/v1/proofs</code></td><td>Generate the Lean workspace and run <code>lake build</code> on demand.</td></tr>
     <tr><td><code>POST /api/v1/translate</code></td><td>SLM prose&rarr;DSL translation (pluggable provider; stub by default). Returns reviewable DSL — writes nothing, proves nothing.</td></tr>
-    <tr><td><code>POST /api/v1/check</code></td><td>Dry-run validation of a proposed rule; returns verdict, tests, and glossary warnings. Writes nothing.</td></tr>
+    <tr><td><code>POST /api/v1/check</code></td><td>Dry-run validation of a proposed rule: compatibility (conflicts), <em>conformance</em> (rule vs its own <code>examples</code> = correctness vs intent), tests, and glossary warnings. Writes nothing.</td></tr>
     <tr><td><code>GET /api/v1/glossary</code></td><td>The domain glossary: entities with their aliases, fields, enums, and operations.</td></tr>
     <tr><td><code>GET /api/v1/lifecycle</code></td><td>State-machine coverage per entity state field: transitions and gaps (no-incoming / no-outgoing / isolated / undeclared).</td></tr>
     <tr><td><code>GET /api/v1/reconcile</code></td><td>Reconcile declared state domains against observed data (database / file / none): suggested completions and unseen states.</td></tr>

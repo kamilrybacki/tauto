@@ -70,6 +70,25 @@ impl Diagnostic {
     }
 }
 
+/// A concrete case the author expects the rule to handle a certain way — the
+/// user's *intent* made checkable. `given` is the input entity state, `then` the
+/// expected result state (when the rule applies). `applies=false` means the rule
+/// should NOT fire on `given`. Conformance evaluates the rule against these.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuleExample {
+    #[serde(default)]
+    pub given: std::collections::BTreeMap<String, ExpressionValue>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub then: std::collections::BTreeMap<String, ExpressionValue>,
+    /// Whether the rule is expected to fire on `given` (default true).
+    #[serde(default = "default_true")]
+    pub applies: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContractIR {
     pub case: String,
@@ -85,6 +104,12 @@ pub struct ContractIR {
     pub preserves: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assumes: Vec<String>,
+    /// Free-text statement of what the rule is meant to do (the human intent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent: Option<String>,
+    /// Checkable examples of the intent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub examples: Vec<RuleExample>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<SourceLocation>,
 }
@@ -100,6 +125,8 @@ impl ContractIR {
             forbidden: Vec::new(),
             preserves: Vec::new(),
             assumes: Vec::new(),
+            intent: None,
+            examples: Vec::new(),
             source: None,
         }
     }
@@ -177,6 +204,8 @@ mod tests {
             forbidden: vec![],
             preserves: vec![],
             assumes: vec![],
+            intent: None,
+            examples: vec![],
             source: None,
         };
         let json = serde_json::to_string(&c).unwrap();

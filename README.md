@@ -64,7 +64,38 @@ OpenAI-compatible server** (a hosted API, or a local Ollama/vLLM/llama.cpp):
 
 `POST /api/v1/check` validates a proposed rule against the current set **without
 persisting anything** and returns a compatibility verdict plus a generated test
-suite:
+suite.
+
+**Correctness vs intent (conformance).** A rule can carry an `intent:` line (what
+it's meant to do) and `examples:` — concrete cases the author expects. tauto
+evaluates the rule against its own examples (reusing the conditions as decidable
+predicates) and reports `conformant` + per-example outcomes. A `fail` means the
+**formalization contradicts the stated intent** — e.g. the rule ensures
+`Shipped` but an example says a paid order becomes `Cancelled`. This is
+correctness *relative to the stated cases*, no operation model needed, and the
+examples double as grounded test cases:
+
+````markdown
+```contract
+case ShipPaidOrder
+entity:
+  Order
+operation:
+  ship
+requires:
+  order.status == Paid
+ensures:
+  result.status == Shipped
+intent:
+  A paid order should ship.
+examples:
+  - given: status=Paid; then: status=Shipped
+  - given: status=Unpaid; applies: false
+```
+````
+
+So `/check` gives the full triad: **compatibility** (rules vs rules) ·
+**correctness** (rules vs intent-examples) · **tests** (the suite). Example:
 
 ```bash
 curl -X POST http://localhost:4000/api/v1/check \

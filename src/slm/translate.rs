@@ -57,9 +57,17 @@ tauto contract DSL. Emit one or more fenced ```contract blocks. Each block:
     <field.path>                   # fields left unchanged
   assumes:
     <free-form fact>
+  intent:
+    <one-line restatement of what the rule is meant to do>
+  examples:
+    - given: field=Value, field=N; then: field=Value    # a case the rule handles
+    - given: field=Value; applies: false                # a case the rule must NOT fire on
 Operators: == != >= <= > <. Values: integers, true/false, or Uppercase enum
 members (e.g. Approved). Field paths are lowercase dotted (loan.credit_score);
-postconditions use the result.* prefix. Guard on the entity's state field.";
+postconditions use the result.* prefix. Guard on the entity's state field.
+In `given`/`then`, use BARE field names (status, credit_score), not dotted paths.
+Extract `intent` from the prose, and turn any concrete cases the prose mentions
+into `examples` (do NOT invent cases the prose didn't state).";
 
 /// Build the prose→DSL prompt for a chat SLM. Public so it is unit-testable
 /// without any network call.
