@@ -23,29 +23,50 @@ storage:
 # injected as an ArgoCD Application helm parameter (kept out of this public repo).
 allowedLanCidr: 10.0.0.0/8
 
-# The Proofs endpoint runs `lake build` in-process (CPU/memory heavy), so the
-# limits give real headroom — a tight cap starves the liveness probe during a
-# build and gets the pod killed.
+# The web pod no longer runs lake build (that moved to the lake-worker service),
+# so it's back to a modest footprint.
 resources:
   requests:
-    cpu: 100m
-    memory: 128Mi
+    cpu: 50m
+    memory: 64Mi
   limits:
-    cpu: "2"
-    memory: 768Mi
+    cpu: 300m
+    memory: 192Mi
 
 probes:
-  # Liveness is deliberately forgiving: a long `lake build` must not look like a
-  # dead pod. Readiness is tighter so traffic only routes to a responsive pod.
   liveness:
     path: /api/v1/contracts
-    initialDelaySeconds: 10
+    initialDelaySeconds: 5
     periodSeconds: 20
-    timeoutSeconds: 5
-    failureThreshold: 6
+    timeoutSeconds: 3
+    failureThreshold: 3
   readiness:
     path: /api/v1/contracts
     initialDelaySeconds: 3
     periodSeconds: 10
     timeoutSeconds: 3
     failureThreshold: 3
+
+# Lean build service — a separate Deployment+Service running `tauto lake-worker`
+# from the fat (Lean-toolchain) image. The web pod POSTs proof workspaces to it
+# (TAUTO_LAKE_URL) so the Proofs panel can compile without bloating or slowing
+# the web image. Disable to run the web app alone (Proofs then shows
+# "lake not available"). Because it composes the generic build contract, this
+# can also point at any external Lake service instead of this Deployment.
+lakeWorker:
+  enabled: true
+  image:
+    repository: ghcr.io/kamilrybacki/tauto-lake
+    # Manually managed (NOT auto-bumped) — the worker changes rarely. 4-space
+    # indent keeps it clear of the web-image tag auto-bump sed in CI.
+    tag: latest
+    pullPolicy: Always
+  port: 4001
+  # lake build is CPU/memory heavy — the headroom lives here now, not the web pod.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi

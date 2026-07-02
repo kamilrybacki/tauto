@@ -1,0 +1,55 @@
+{{- if .Values.lakeWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tauto-lake
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: tauto-lake
+spec:
+  revisionHistoryLimit: 2
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tauto-lake
+  template:
+    metadata:
+      labels:
+        app: tauto-lake
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: tauto-lake
+          image: "{{ .Values.lakeWorker.image.repository }}:{{ .Values.lakeWorker.image.tag }}"
+          imagePullPolicy: {{ .Values.lakeWorker.image.pullPolicy }}
+          args:
+            - lake-worker
+            - --port
+            - {{ .Values.lakeWorker.port | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.lakeWorker.port }}
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.lakeWorker.resources | nindent 12 }}
+{{- end }}

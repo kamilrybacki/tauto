@@ -84,6 +84,28 @@ jobs:
             --output /tmp/lean-workspace \
             --lean-check
 
+      - name: Verify the lake-worker build service end-to-end
+        run: |
+          ./target/release/tauto lake-worker --port 4101 &
+          WORKER=$!
+          trap 'kill $WORKER 2>/dev/null || true' EXIT
+          for _ in $(seq 1 20); do curl -sf http://127.0.0.1:4101/health && break; sleep 0.5; done
+          # Generate a real workspace, POST it to the worker, assert it compiles.
+          ./target/release/tauto verify tests/fixtures/orders.md --output /tmp/ws >/dev/null
+          python3 - <<'PY'
+          import json, glob, os, urllib.request
+          files = []
+          for p in glob.glob('/tmp/ws/**/*', recursive=True):
+              if os.path.isfile(p):
+                  files.append({"path": os.path.relpath(p, '/tmp/ws'), "content": open(p).read()})
+          req = urllib.request.Request("http://127.0.0.1:4101/build",
+              data=json.dumps({"files": files}).encode(),
+              headers={"Content-Type": "application/json"})
+          r = json.load(urllib.request.urlopen(req, timeout=180))
+          assert r["success"], f"lake-worker build failed: {r.get('stderr','')[:500]}"
+          print("lake-worker build OK")
+          PY
+
   e2e:
     name: E2E – contract lifecycle and conflict rejection
     runs-on: ubuntu-latest
@@ -133,13 +155,32 @@ jobs:
             type=sha,prefix=,format=short
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build and push
+      - name: Build and push (slim web image)
         uses: docker/build-push-action@v6
         with:
           context: .
+          target: runtime
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Extract lake-worker image metadata
+        id: meta_lake
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/tauto-lake
+          tags: |
+            type=sha,prefix=,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push (lake-worker image, with Lean toolchain)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: lake-worker
+          push: true
+          tags: ${{ steps.meta_lake.outputs.tags }}
+          labels: ${{ steps.meta_lake.outputs.labels }}
 
       - name: Pin chart image tag to the published SHA
         if: github.ref == 'refs/heads/main'

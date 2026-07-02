@@ -1,0 +1,23 @@
+{{- if .Values.lakeWorker.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tauto-lake
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: tauto-lake
+spec:
+  podSelector:
+    matchLabels:
+      app: tauto-lake
+  policyTypes:
+    - Ingress
+  ingress:
+    # Only the tauto web pods may reach the build service, within this namespace.
+    - ports:
+        - port: {{ .Values.lakeWorker.port }}
+      from:
+        - podSelector:
+            matchLabels:
+              app: tauto
+{{- end }}

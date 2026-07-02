@@ -1,0 +1,18 @@
+{{- if .Values.lakeWorker.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: tauto-lake
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: tauto-lake
+spec:
+  type: ClusterIP
+  selector:
+    app: tauto-lake
+  ports:
+    - port: {{ .Values.lakeWorker.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+{{- end }}

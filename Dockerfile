@@ -14,15 +14,35 @@ COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src/
 RUN cargo build --release
 
-# Stage 3: minimal runtime image — the Rust binary + built UI only.
+# Stage 3 (target: lake-worker) — the Lean build service.
+#
+# This is the ONLY image that ships the ~800 MB Lean toolchain. It runs the
+# generic build service (`tauto lake-worker`) and is deployed as a separate,
+# rarely-redeployed workload, so the Lean bloat never touches the web pod's
+# rollout. It intentionally does NOT set TAUTO_SKIP_LEAN_CHECK — the startup
+# check should fail loudly if this image lacks a working lake.
+FROM debian:bookworm-slim AS lake-worker
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libssl3 ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+    | sh -s -- -y --default-toolchain leanprover/lean4:stable \
+    && /root/.elan/bin/lake --version
+ENV PATH="/root/.elan/bin:$PATH"
+COPY --from=rust-builder /build/target/release/tauto /usr/local/bin/tauto
+EXPOSE 4001
+ENTRYPOINT ["tauto"]
+CMD ["lake-worker", "--port", "4001"]
+
+# Stage 4 (default target: runtime) — minimal web image: Rust binary + built UI.
 #
 # The Lean toolchain is intentionally NOT shipped here: it added ~800 MB (slow
 # pulls, long Recreate rollouts) and running `lake build` in the serving pod
-# starved the liveness probe. The Proofs endpoint degrades gracefully when
-# `lake` is absent (build_available:false) — it still generates and displays the
-# sorry-stubbed proof obligations in-process. The real `lake build` check runs
-# in CI (the lean-verify job), not on the live pod.
-FROM debian:bookworm-slim
+# starved the liveness probe. Compilation now runs in the separate lake-worker
+# service (set TAUTO_LAKE_URL); without it the Proofs endpoint degrades
+# gracefully (build_available:false) but still shows the sorry-stubbed
+# obligations. The real `lake build` gate also runs in CI (lean-verify).
+FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libssl3 ca-certificates \
     && rm -rf /var/lib/apt/lists/*

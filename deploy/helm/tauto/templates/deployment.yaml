@@ -37,6 +37,10 @@ spec:
           env:
             - name: TAUTO_SKIP_LEAN_CHECK
               value: "1"
+            {{- if .Values.lakeWorker.enabled }}
+            - name: TAUTO_LAKE_URL
+              value: "http://tauto-lake:{{ .Values.lakeWorker.port }}/build"
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
