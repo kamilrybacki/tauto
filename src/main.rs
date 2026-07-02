@@ -13,7 +13,7 @@ use tauto::lean_gen::{
 };
 use tauto::project_store::{load_document, save_document, ContractDocument};
 use tauto::scanner::collect_markdown_files;
-use tauto::server::{run_mcp, run_serve};
+use tauto::server::{run_lake_worker, run_mcp, run_serve};
 use tauto::slm::{ArtifactKind, CodeGenerationRequest, DeepSeekProvider, SlmCodeGenerator};
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
@@ -124,6 +124,12 @@ enum Commands {
         #[arg(long)]
         api_url: Option<String>,
     },
+    /// Run the Lean build service: POST /build a workspace, get a lake build result
+    LakeWorker {
+        /// Port to listen on
+        #[arg(long, default_value = "4001")]
+        port: u16,
+    },
 }
 
 fn main() {
@@ -159,6 +165,9 @@ fn main() {
                 .or_else(|| std::env::var("TAUTO_API_URL").ok())
                 .unwrap_or_else(|| "http://localhost:4000".to_owned());
             run_mcp(url).map_err(|e| e.to_string().into())
+        }
+        Commands::LakeWorker { port } => {
+            run_lake_worker(port).map_err(|e| e.to_string().into())
         }
     };
     if let Err(e) = result {

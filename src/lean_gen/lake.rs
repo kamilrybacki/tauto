@@ -1,11 +1,55 @@
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
-#[derive(Debug, Clone, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+use crate::lean_gen::workspace::{LeanWorkspace, LeanWorkspaceFile};
+
+/// Result of a `lake build`, and the response body of a remote build service.
+/// `serde(default)` on the text fields keeps the client tolerant of a minimal
+/// service that returns only `{"success": bool}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LakeBuildResult {
     pub success: bool,
+    #[serde(default)]
     pub stdout: String,
+    #[serde(default)]
     pub stderr: String,
+}
+
+/// Request body of the generic remote build contract: the workspace to compile,
+/// as a flat list of `{path, content}` files. Any Lake-capable service can
+/// implement this — write the files, run `lake build`, return a LakeBuildResult.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LakeBuildRequest {
+    pub files: Vec<LeanWorkspaceFile>,
+}
+
+/// Build a Lean workspace on a remote Lake service. `endpoint` is the full build
+/// URL (e.g. `http://tauto-lake:4001/build`), so tauto can target any conforming
+/// deployment. A finite timeout bounds the request; connection/timeout/HTTP
+/// errors surface as `Err` for the caller to degrade gracefully.
+pub fn run_lake_build_remote(
+    endpoint: &str,
+    workspace: &LeanWorkspace,
+    timeout: Duration,
+) -> Result<LakeBuildResult, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let body = LakeBuildRequest { files: workspace.files.clone() };
+    let resp = client
+        .post(endpoint)
+        .json(&body)
+        .send()
+        .map_err(|e| format!("request to {endpoint} failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("{endpoint} returned HTTP {}", resp.status()));
+    }
+    resp.json::<LakeBuildResult>()
+        .map_err(|e| format!("invalid build response from {endpoint}: {e}"))
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -88,5 +132,32 @@ mod tests {
         };
         assert!(matches!(mapped, LakeError::NotFound));
         drop(dir);
+    }
+
+    #[test]
+    fn build_result_deserializes_from_minimal_success_only() {
+        // The client must tolerate a spartan service that returns only success.
+        let r: LakeBuildResult = serde_json::from_str(r#"{"success":true}"#).unwrap();
+        assert!(r.success);
+        assert_eq!(r.stdout, "");
+        assert_eq!(r.stderr, "");
+    }
+
+    #[test]
+    fn build_request_round_trips() {
+        let req = LakeBuildRequest {
+            files: vec![LeanWorkspaceFile { path: "lakefile.toml".into(), content: "name = \"X\"".into() }],
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let back: LakeBuildRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(req, back);
+    }
+
+    #[test]
+    fn remote_build_errors_gracefully_on_unreachable_endpoint() {
+        let ws = LeanWorkspace { files: vec![] };
+        // Port 1 is unbound — connection must fail as Err, not panic/hang.
+        let out = run_lake_build_remote("http://127.0.0.1:1/build", &ws, Duration::from_millis(500));
+        assert!(out.is_err());
     }
 }

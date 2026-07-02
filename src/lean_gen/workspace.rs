@@ -1,12 +1,14 @@
+use serde::{Deserialize, Serialize};
+
 use crate::contract_ir::{Condition, ContractIR, ContractSet, Expression, ExpressionValue};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LeanWorkspaceFile {
     pub path: String,
     pub content: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LeanWorkspace {
     pub files: Vec<LeanWorkspaceFile>,
 }

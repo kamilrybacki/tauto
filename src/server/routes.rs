@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Multipart, State};
 use axum::http::StatusCode;
@@ -18,7 +18,10 @@ use crate::glossary::{
     self, FileStateSource, Glossary, GlossaryWarning, ObservedDomains, ReconcileReport,
     StateCoverage, StateSource,
 };
-use crate::lean_gen::{generate_lean_workspace, run_lake_build, write_lean_workspace};
+use crate::lean_gen::{
+    generate_lean_workspace, run_lake_build, run_lake_build_remote, write_lean_workspace,
+    LakeBuildResult,
+};
 use crate::scanner::{scan_glossary, scan_path};
 use crate::test_gen;
 
@@ -358,20 +361,52 @@ async fn handle_proofs(State(state): State<Arc<ServerState>>) -> ApiResult<Proof
     let build_dir = tempfile::tempdir().map_err(|e| api_err(e.to_string()))?;
     let build_path = build_dir.path().to_path_buf();
     let workspace_clone = workspace;
+    // Prefer a remote Lean build service (any deployment implementing the build
+    // contract) when TAUTO_LAKE_URL is set; else fall back to a local `lake` on
+    // PATH; else report unavailable. Service errors degrade gracefully to
+    // build_available=false — never a 500, so a slow/down builder can't hang the
+    // proofs request or trip the liveness probe.
+    let lake_url = std::env::var("TAUTO_LAKE_URL").ok();
 
-    let build_result = tokio::task::spawn_blocking(move || {
-        write_lean_workspace(&workspace_clone, &build_path)
-            .map_err(|e| e.to_string())?;
-        run_lake_build(&build_path).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| api_err(e.to_string()))?;
+    let (build_available, result): (bool, LakeBuildResult) =
+        tokio::task::spawn_blocking(move || {
+            if let Some(url) = lake_url {
+                return match run_lake_build_remote(&url, &workspace_clone, Duration::from_secs(180)) {
+                    Ok(r) => (true, r),
+                    Err(e) => (
+                        false,
+                        LakeBuildResult {
+                            success: false,
+                            stdout: String::new(),
+                            stderr: format!("lake build service unavailable: {e}"),
+                        },
+                    ),
+                };
+            }
+            if let Err(e) = write_lean_workspace(&workspace_clone, &build_path) {
+                return (
+                    false,
+                    LakeBuildResult { success: false, stdout: String::new(), stderr: e.to_string() },
+                );
+            }
+            match run_lake_build(&build_path) {
+                Ok(r) => (true, r),
+                Err(_) => (
+                    false,
+                    LakeBuildResult {
+                        success: false,
+                        stdout: String::new(),
+                        stderr: "lake not found in PATH — set TAUTO_LAKE_URL to a Lean build service, or install Lean 4 via elan".to_owned(),
+                    },
+                ),
+            }
+        })
+        .await
+        .map_err(|e| api_err(e.to_string()))?;
 
-    let (build_available, build_success, build_stdout, build_stderr) = match build_result {
-        Ok(r) => (true, r.success, r.stdout, r.stderr),
-        Err(e) if e.contains("lake not found") => (false, false, String::new(), e),
-        Err(e) => return Err(api_err(e)),
-    };
+    let build_success = result.success;
+    let build_stdout = result.stdout;
+    let build_stderr = result.stderr;
 
     Ok(Json(ProofsResponse {
         contracts: cs.contracts.len(),
