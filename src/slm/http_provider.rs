@@ -5,9 +5,14 @@ use super::provider::{
     CodeGenerationRequest, GeneratedArtifact, SlmCodeGenerator, SlmError, SlmProviderRef,
 };
 
+/// An OpenAI-compatible chat provider. Defaults to DeepSeek, but the base URL
+/// and model are configurable, so it can point at ANY OpenAI-compatible endpoint
+/// — a hosted API or a local Ollama / vLLM / llama.cpp server — the same
+/// "any deployment" pattern as the lake worker.
 pub struct DeepSeekProvider {
     api_key: String,
     model_id: String,
+    base_url: String,
     client: Client,
 }
 
@@ -15,6 +20,7 @@ impl std::fmt::Debug for DeepSeekProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeepSeekProvider")
             .field("model_id", &self.model_id)
+            .field("base_url", &self.base_url)
             .field("api_key", &"[redacted]")
             .finish()
     }
@@ -34,7 +40,25 @@ impl DeepSeekProvider {
         // no reasoning tier. Overridable via DEEPSEEK_MODEL.
         let model_id =
             std::env::var("DEEPSEEK_MODEL").unwrap_or_else(|_| "deepseek-chat".to_owned());
-        Self { api_key: api_key.into(), model_id, client: Client::new() }
+        // Base URL: any OpenAI-compatible endpoint. SLM_BASE_URL (generic) wins,
+        // then DEEPSEEK_BASE_URL, else the DeepSeek default. Point at a local
+        // Ollama/vLLM (e.g. http://host:11434) to self-host.
+        let base_url = std::env::var("SLM_BASE_URL")
+            .or_else(|_| std::env::var("DEEPSEEK_BASE_URL"))
+            .unwrap_or_else(|_| "https://api.deepseek.com".to_owned());
+        // A finite timeout so a stalled endpoint surfaces as a provider error
+        // (→ 503) instead of hanging the request. Generous enough for slow local
+        // CPU inference.
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .unwrap_or_else(|_| Client::new());
+        Self { api_key: api_key.into(), model_id, base_url, client }
+    }
+
+    /// The chat-completions endpoint for the configured base URL.
+    fn chat_url(&self) -> String {
+        format!("{}/v1/chat/completions", self.base_url.trim_end_matches('/'))
     }
 
     fn build_prompt(lean_stub: &str) -> String {
@@ -64,7 +88,7 @@ impl SlmCodeGenerator for DeepSeekProvider {
 
         let response = self
             .client
-            .post("https://api.deepseek.com/v1/chat/completions")
+            .post(self.chat_url())
             .bearer_auth(&self.api_key)
             .json(&body)
             .send()
@@ -115,7 +139,7 @@ impl super::translate::SlmTranslator for DeepSeekProvider {
         });
         let response = self
             .client
-            .post("https://api.deepseek.com/v1/chat/completions")
+            .post(self.chat_url())
             .bearer_auth(&self.api_key)
             .json(&body)
             .send()
@@ -175,5 +199,19 @@ mod tests {
     fn new_with_key_uses_deepseek_chat_model() {
         let p = DeepSeekProvider::new_with_key("test-key");
         assert_eq!(p.model_id, "deepseek-chat");
+    }
+
+    #[test]
+    fn chat_url_defaults_to_deepseek_and_appends_path() {
+        let p = DeepSeekProvider::new_with_key("k");
+        // Default (no SLM_BASE_URL/DEEPSEEK_BASE_URL in this test env).
+        assert_eq!(p.chat_url(), "https://api.deepseek.com/v1/chat/completions");
+    }
+
+    #[test]
+    fn chat_url_strips_trailing_slash() {
+        let mut p = DeepSeekProvider::new_with_key("k");
+        p.base_url = "http://ollama:11434/".to_owned();
+        assert_eq!(p.chat_url(), "http://ollama:11434/v1/chat/completions");
     }
 }
