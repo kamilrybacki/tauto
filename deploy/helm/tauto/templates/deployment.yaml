@@ -41,6 +41,18 @@ spec:
             - name: TAUTO_LAKE_URL
               value: "http://tauto-lake:{{ .Values.lakeWorker.port }}/build"
             {{- end }}
+            # SLM prose→DSL translation (required capability). The key comes from
+            # a Secret (SOPS-managed, out of this public repo); optional:true so a
+            # not-yet-provisioned key can't wedge the pod — /translate just 503s
+            # until the Secret exists.
+            - name: TAUTO_SLM_PROVIDER
+              value: {{ .Values.slm.provider | quote }}
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.slm.secret.name | quote }}
+                  key: {{ .Values.slm.secret.key | quote }}
+                  optional: {{ .Values.slm.secret.optional }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

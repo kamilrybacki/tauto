@@ -10,6 +10,18 @@ image:
 replicas: 1
 port: 4000
 
+# SLM prose→DSL translation is a REQUIRED capability (POST /api/v1/translate,
+# MCP translate_rule). The DeepSeek key is read from a Secret — never committed
+# here. Provision it out-of-band (this homelab: a SOPS SopsSecret in the private
+# argocd-apps repo, mirroring n8n-main-secrets' deepseek_api_key). optional:true
+# keeps the pod up if the key isn't provisioned yet (translate 503s until then).
+slm:
+  provider: deepseek
+  secret:
+    name: tauto-secrets
+    key: deepseek_api_key
+    optional: true
+
 # Public hostname the Traefik IngressRoute matches. Placeholder default — the
 # real host is injected as an ArgoCD Application helm parameter, so it stays out
 # of this public repo.
