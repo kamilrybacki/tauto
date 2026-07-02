@@ -4,7 +4,7 @@ image:
   # main build (see the "Pin chart image tag" step in .github/workflows/ci.yml),
   # so the chart tracks the latest image while staying an immutable, ArgoCD-
   # friendly pin. The image is public — no pull secret needed.
-  tag: "8c748b1"
+  tag: "1770e0a"
   pullPolicy: IfNotPresent
 
 replicas: 1
