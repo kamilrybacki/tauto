@@ -26,7 +26,9 @@ fn verify_succeeds_on_valid_contracts() {
 }
 
 #[test]
-fn verify_strict_exits_one_when_sorry_stubs_present() {
+fn verify_strict_succeeds_when_workspace_is_sorry_free() {
+    // The generator now emits real, discharged proofs (no sorry stubs), so
+    // --strict — which fails only on remaining stubs — succeeds.
     let out = tempfile::tempdir().unwrap();
     tauto()
         .args([
@@ -37,7 +39,7 @@ fn verify_strict_exits_one_when_sorry_stubs_present() {
             "--strict",
         ])
         .assert()
-        .failure();
+        .success();
 }
 
 #[test]
@@ -83,7 +85,8 @@ fn verify_format_json_outputs_valid_json() {
     let v: serde_json::Value = serde_json::from_str(&text).expect("stdout must be valid JSON");
     assert_eq!(v["contracts"], 2);
     assert_eq!(v["files"], 1);
-    assert!(v["sorry_count"].as_u64().unwrap() > 0);
+    // Generated obligations are now real proofs, so no sorry stubs remain.
+    assert_eq!(v["sorry_count"].as_u64().unwrap(), 0);
     assert!(v["conflicts"].is_array());
 }
 
