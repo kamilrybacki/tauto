@@ -155,7 +155,7 @@ export default function CheckPanel() {
                 <h3 style={{ marginTop: 24 }}><span className="secnum">§5.1</span>Conformance suite</h3>
                 {data.tests.proposed.map((s) => (
                   <div key={s.contract}>
-                    <p className="prose" style={{ fontSize: 15, margin: '8px 0 0' }}>
+                    <p className="section-desc" style={{ fontSize: 15, margin: '8px 0 0' }}>
                       <code>{caseOf(s.contract)}</code>
                     </p>
                     {s.cases.map((tc, i) => (

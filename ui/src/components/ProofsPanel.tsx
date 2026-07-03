@@ -29,7 +29,7 @@ export default function ProofsPanel() {
     return (
       <div>
         <button className="outline-btn" onClick={run}>Build proof obligations</button>
-        <p className="prose" style={{ fontSize: 15, marginTop: 12, fontStyle: 'italic' }}>
+        <p className="section-desc" style={{ fontSize: 15, marginTop: 12, fontStyle: 'italic' }}>
           Each contract is compiled to a Lean&nbsp;4 theorem; satisfiability and conflict obligations are
           discharged by <code>decide</code> / <code>omega</code>.
         </p>
@@ -93,10 +93,10 @@ export default function ProofsPanel() {
         <div className="thm-listing">
           {selected && (
             <>
-              <figcaption className="figcaption" style={{ textAlign: 'left', margin: '0 0 4px' }}>
-                <b>Listing 4.</b> <code>{selected.path}</code>
+              <div className="cap">
+                <code>{selected.path}</code>
                 {proven && isContractThm && <span className="thm-qed">∎</span>}
-              </figcaption>
+              </div>
               <pre>{selected.content}</pre>
             </>
           )}

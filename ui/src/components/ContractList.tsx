@@ -10,119 +10,86 @@ interface Props {
 
 const cond = (c: Condition): string =>
   `${String(c.left.value)} ${c.operator} ${String(c.right.value)}`;
-
 const forbidden = (f: ForbiddenOperation): string =>
   `${f.operation}(${(f.args ?? []).map((a) => String(a.value)).join(', ')})`;
-
 const caseOf = (key: string): string => key.split('/').pop() ?? key;
 
-const NOMEN: [string, string][] = [
-  ['requires', 'Preconditions — all must hold for the operation to apply.'],
-  ['⊢', 'Turnstile — the requires above entail the ensures below.'],
-  ['ensures', 'Postconditions guaranteed of the result when it applies.'],
-  ['forbidden', 'Operations that must not occur.'],
-  ['preserves', 'Field paths whose value is unchanged.'],
-  ['assumes', 'Ambient facts taken as given, not checked.'],
-  ['⊥', 'Contradiction — two rules that cannot both hold.'],
-];
+function Row({ label, red, children }: { label: string; red?: boolean; children: React.ReactNode }) {
+  return (
+    <>
+      <span className={`cc-label${red ? ' red' : ''}`}>{label}</span>
+      <div className={`cc-vals${red ? ' red' : ''}`}>{children}</div>
+    </>
+  );
+}
 
 export default function ContractList({ contracts, conflicts, selected, onSelect, onJump }: Props) {
   const conflictEdges = conflicts.filter((e) => e.kind === 'conflict');
 
   return (
     <div>
-      {contracts.map((c, i) => {
+      {contracts.map((c) => {
         const clashes = conflictEdges
           .filter((e) => e.source === c.key || e.target === c.key)
           .map((e) => ({ other: e.source === c.key ? e.target : e.source, reason: e.label }));
         return (
           <article
             key={c.key}
-            className={`proposition${selected === c.key ? ' selected' : ''}`}
+            className={`contract-card${selected === c.key ? ' selected' : ''}${clashes.length ? ' has-conflict' : ''}`}
             onClick={() => onSelect(c)}
           >
-            <p className="prop-statement">
-              <strong>Proposition 2.{i + 1}</strong>
-              <strong>&nbsp;({c.case}).</strong>
-              <span className="lead">&nbsp;For a {c.entity}, operation </span>
-              <code>{c.operation}</code>
-              <span className="lead">:</span>
-            </p>
+            <div className="cc-head">
+              <span className="cc-title">{c.case}</span>
+              <span className="cc-path">{c.entity} · {c.operation}</span>
+              {clashes.length > 0 && <span className="pill conflict">conflict</span>}
+            </div>
 
-            <div className="prop-body">
-              <span className="prop-label">requires</span>
-              <div className="prop-values">
+            <div className="cc-grid">
+              <Row label="requires">
                 {c.requires.length ? (
-                  c.requires.map((r, j) => (
-                    <div className="val" key={j}>
-                      <code>{cond(r)}</code>
-                    </div>
-                  ))
+                  c.requires.map((r, j) => <code key={j}>{cond(r)}</code>)
                 ) : (
-                  <div className="val" style={{ color: 'var(--ink-60)', fontStyle: 'italic' }}>—</div>
+                  <span className="muted">—</span>
                 )}
-              </div>
-
-              <span className="turnstile" aria-hidden="true">⊢</span>
-              <span className="prop-hr" />
-
-              <span className="prop-label">ensures</span>
-              <div className="prop-values">
+              </Row>
+              <Row label="ensures">
                 {c.ensures.length ? (
-                  c.ensures.map((e, j) => (
-                    <div className="val" key={j}>
-                      <code>{cond(e)}</code>
-                    </div>
-                  ))
+                  c.ensures.map((e, j) => <code key={j}>{cond(e)}</code>)
                 ) : (
-                  <div className="val" style={{ color: 'var(--ink-60)', fontStyle: 'italic' }}>—</div>
+                  <span className="muted">—</span>
                 )}
-              </div>
-
+              </Row>
               {c.forbidden.length > 0 && (
-                <>
-                  <span className="prop-label red">forbidden</span>
-                  <div className="prop-values red">
-                    {c.forbidden.map((f, j) => (
-                      <div className="val" key={j}>
-                        <code>{forbidden(f)}</code>
-                      </div>
-                    ))}
-                  </div>
-                </>
+                <Row label="forbidden" red>
+                  {c.forbidden.map((f, j) => <code key={j}>{forbidden(f)}</code>)}
+                </Row>
               )}
               {c.preserves.length > 0 && (
-                <>
-                  <span className="prop-label">preserves</span>
-                  <div className="prop-values">
-                    <code>{c.preserves.join(', ')}</code>
-                  </div>
-                </>
+                <Row label="preserves">
+                  <code>{c.preserves.join(', ')}</code>
+                </Row>
               )}
               {c.assumes.length > 0 && (
-                <>
-                  <span className="prop-label">assumes</span>
-                  <div className="prop-values" style={{ fontStyle: 'italic' }}>
-                    {c.assumes.join('; ')}
-                  </div>
-                </>
+                <Row label="assumes">
+                  <span className="muted" style={{ fontFamily: 'var(--sans)', fontSize: 13 }}>{c.assumes.join('; ')}</span>
+                </Row>
               )}
             </div>
 
             {(c.intent || c.source) && (
-              <p className="prop-intent">
+              <p className="cc-intent">
                 {c.intent && (
                   <>
                     <span className="lbl">Intent.</span> {c.intent}{' '}
                   </>
                 )}
-                {c.source && <span className="src">[{c.source}]</span>}
+                {c.source && <span className="src">{c.source}</span>}
               </p>
             )}
 
             {clashes.map((cl, j) => (
-              <div className="bot-callout" key={j}>
-                ⊥ In contradiction with{' '}
+              <div className="cc-conflict" key={j}>
+                Conflicts with{' '}
                 <button
                   onClick={(ev) => {
                     ev.stopPropagation();
@@ -137,27 +104,6 @@ export default function ContractList({ contracts, conflicts, selected, onSelect,
           </article>
         );
       })}
-
-      <h3 style={{ marginTop: 34 }}>
-        <span className="secnum">§2.1</span>
-        Nomenclature
-      </h3>
-      <table className="nomen">
-        <thead>
-          <tr>
-            <th scope="col">Term</th>
-            <th scope="col">Meaning</th>
-          </tr>
-        </thead>
-        <tbody>
-          {NOMEN.map(([term, meaning]) => (
-            <tr key={term}>
-              <td className="term">{term}</td>
-              <td>{meaning}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

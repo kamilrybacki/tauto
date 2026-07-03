@@ -11,9 +11,9 @@ type Load =
 
 type Category = 'initial' | 'terminal' | 'isolated' | 'undeclared' | 'normal';
 
-const INK = '#1c1814';
-const RED = '#8c2f22';
-const PAPER = '#faf7ef';
+const INK = '#191c21';
+const RED = '#dc2626';
+const PAPER = '#ffffff';
 
 const CATEGORY_STYLE: Record<Category, React.CSSProperties> = {
   initial: { border: `2px solid ${INK}` },
@@ -102,11 +102,11 @@ function CoverageFigure({ c, num }: { c: StateCoverage; num: number }) {
           colorMode="light"
           aria-label={`Lifecycle of ${c.entity}.${c.state_field}`}
         >
-          <Background color="rgba(28,24,20,0.08)" gap={20} />
+          <Background color="#e6e8ec" gap={20} />
         </ReactFlow>
       </div>
       <figcaption className="figcaption">
-        <b>Figure 3.{num}.</b> Lifecycle of <code>{c.entity}.{c.state_field}</code> — {c.states.length} declared
+        Lifecycle of <code>{c.entity}.{c.state_field}</code> — {c.states.length} declared
         state{c.states.length !== 1 ? 's' : ''}, {transitions} transition{transitions !== 1 ? 's' : ''}.
       </figcaption>
       {flags.length > 0 && <p className="figure-note">{flags.join(' · ')}</p>}
@@ -135,7 +135,7 @@ export default function StateMachinePanel() {
 
   return (
     <div>
-      <p className="prose" style={{ fontSize: 15, color: 'var(--ink-70)' }}>
+      <p className="section-desc" style={{ fontSize: 15, color: 'var(--text-2)' }}>
         Legend: solid border — initial (no incoming); double border — terminal (no outgoing);{' '}
         <span style={{ color: 'var(--red)', fontStyle: 'italic' }}>dashed red — isolated</span> (no rule);{' '}
         <span style={{ color: 'var(--red)' }}>dotted red — undeclared</span> (seen only in data).

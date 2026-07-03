@@ -20,9 +20,9 @@ function ContractNode({ data }: { data: ContractNodeData }) {
   return (
     <div
       className={`rf-node${data.conflict ? ' conflict' : ''}`}
-      style={{ minWidth: 176, boxShadow: data.selected ? '0 0 0 2px #1f3a68' : 'none', cursor: 'pointer' }}
+      style={{ minWidth: 176, boxShadow: data.selected ? '0 0 0 3px #eef0fe' : 'none', borderColor: data.selected ? '#4f46e5' : undefined, cursor: 'pointer' }}
     >
-      <Handle type="target" position={Position.Left} style={{ background: 'var(--ink-60)', width: 5, height: 5 }} />
+      <Handle type="target" position={Position.Left} style={{ background: '#8a919c', width: 5, height: 5 }} />
       <div className="rf-node-title" style={{ fontWeight: 600 }}>{data.case}</div>
       <div className="rf-node-sub">
         {data.entity} · {data.operation}
@@ -30,7 +30,7 @@ function ContractNode({ data }: { data: ContractNodeData }) {
       <div className="rf-node-sub">
         {r} req · {e} ens{data.conflict ? ' · ⊥' : ''}
       </div>
-      <Handle type="source" position={Position.Right} style={{ background: 'var(--ink-60)', width: 5, height: 5 }} />
+      <Handle type="source" position={Position.Right} style={{ background: '#8a919c', width: 5, height: 5 }} />
     </div>
   );
 }
@@ -86,14 +86,14 @@ export default function ContractGraph({ graph, slug, selected, onSelect }: Contr
       id: e.id,
       source: e.source,
       target: e.target,
-      label: e.kind === 'conflict' ? '⊥' : undefined,
+      label: e.kind === 'conflict' ? 'conflict' : undefined,
       style: {
-        stroke: e.kind === 'conflict' ? '#8c2f22' : 'rgba(28,24,20,0.3)',
+        stroke: e.kind === 'conflict' ? '#dc2626' : '#cbd0d8',
         strokeWidth: e.kind === 'conflict' ? 1.5 : 1,
-        strokeDasharray: '5 4',
+        strokeDasharray: e.kind === 'conflict' ? '5 4' : undefined,
       },
-      labelStyle: { fill: '#8c2f22', fontSize: 13, fontFamily: 'EB Garamond, serif' },
-      labelBgStyle: { fill: '#faf7ef' },
+      labelStyle: { fill: '#dc2626', fontSize: 11, fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600 },
+      labelBgStyle: { fill: '#ffffff' },
     })),
   [graph.edges]);
 
@@ -116,12 +116,12 @@ export default function ContractGraph({ graph, slug, selected, onSelect }: Contr
           colorMode="light"
           aria-label="Rule dependency graph"
         >
-          <Background color="rgba(28,24,20,0.08)" gap={26} />
+          <Background color="#e6e8ec" gap={26} />
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>
       <figcaption className="figcaption">
-        <b>Figure 1.</b> Rule dependency graph for <em>{slug || 'default'}</em>: {graph.nodes.length} rules
+        Rule dependency graph for <em>{slug || 'default'}</em>: {graph.nodes.length} rules
         across {ops} operations{conflicts > 0 ? `, ${conflicts} candidate contradiction${conflicts !== 1 ? 's' : ''} (⊥)` : ''}.
       </figcaption>
     </figure>

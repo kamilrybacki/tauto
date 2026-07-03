@@ -22,10 +22,10 @@ export default function HistoryPanel({ entries }: HistoryPanelProps) {
   return (
     <div className="revlist">
       {ordered.map((entry, i) => (
-        <div key={entry.id} className="rev">
+        <div key={entry.id} className={`rev ${entry.outcome}`}>
           <span className="revn">Rev. {ordered.length - i}</span>
           <span className="file">{entry.filename}</span>
-          <span className={`outcome ${entry.outcome}`}>{entry.outcome}</span>
+          <span className={`pill ${entry.outcome}`}>{entry.outcome}</span>
           <span className="meta">
             {entry.contracts_count} contract{entry.contracts_count !== 1 ? 's' : ''}
             {entry.parse_errors > 0 && ` · ${entry.parse_errors} parse error${entry.parse_errors !== 1 ? 's' : ''}`}
@@ -33,7 +33,7 @@ export default function HistoryPanel({ entries }: HistoryPanelProps) {
           <span className="time">{formatTime(entry.timestamp_unix)}</span>
           {entry.conflicts.map((c, j) => (
             <div className="rev-bot" key={j}>
-              ⊥ barred by {caseOf(c.key_a)} ↔ {caseOf(c.key_b)} — {c.reason}
+              Barred by {caseOf(c.key_a)} ↔ {caseOf(c.key_b)} — {c.reason}
             </div>
           ))}
         </div>
