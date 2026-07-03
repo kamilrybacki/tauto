@@ -16,8 +16,9 @@ const SECTIONS: { view: View; title: string; desc: React.ReactNode }[] = [
     title: 'Rules',
     desc: (
       <>
-        Every contract in the set, with its preconditions and guaranteed outcome. Rules that clash
-        are flagged <span className="bot">in conflict</span>.
+        Rules that share an operation form one decision table — guards line up as columns, the
+        outcome sits at the end. Contradictory rows are flagged <span className="bot">⊥</span>; click
+        a row for its intent and clauses.
       </>
     ),
   },
@@ -157,7 +158,6 @@ export default function App() {
             conflicts={graph.edges}
             selected={selected?.key ?? null}
             onSelect={(item) => setSelected(item)}
-            onJump={selectByKey}
           />
         )}
         {view === 'states' && <StateMachinePanel key={project} />}

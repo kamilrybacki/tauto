@@ -162,6 +162,46 @@ code, pre { font-family: var(--mono); }
 .link-btn { background: none; border: none; color: var(--accent); cursor: pointer; font: inherit; padding: 0; }
 .link-btn:hover { text-decoration: underline; }
 
+/* ── rules explorer: entity tree + decision tables ─────────────────────────── */
+
+.explorer { display: grid; grid-template-columns: 232px 1fr; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.tree { border-right: 1px solid var(--border); padding: 12px 8px; background: var(--surface-2); font-size: 13px; overflow-y: auto; }
+.tree .ent { font-weight: 600; padding: 6px 8px 2px; font-size: 12.5px; background: none; border: none; cursor: pointer; display: flex; width: 100%; text-align: left; align-items: baseline; gap: 6px; color: var(--text); }
+.tree .ent .n { color: var(--text-3); font-weight: 400; }
+.tree .op { color: var(--text-2); padding: 3px 8px 3px 20px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; background: none; border: none; width: 100%; text-align: left; font-size: 13px; }
+.tree .op:hover { background: var(--surface); }
+.tree .op.active { background: var(--accent-soft); color: var(--accent-2); font-weight: 500; }
+.tree .flag { margin-left: auto; font-size: 10px; font-weight: 700; border-radius: 8px; padding: 0 6px; }
+.flag.conflict { background: var(--red-soft); color: var(--red); }
+.dtables { padding: 16px 18px; min-width: 0; }
+.dt { margin: 0 0 24px; }
+.dt-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 6px; }
+.dt-head .name { font-weight: 600; font-size: 14.5px; }
+.dt-head .meta { color: var(--text-3); font-size: 12px; }
+.dt-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+table.decision { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.decision th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); background: var(--surface-2); border-bottom: 1px solid var(--border); padding: 7px 10px; white-space: nowrap; }
+.decision th.out, .decision td.out { border-left: 2px solid var(--border-strong); }
+.decision th.warncol { color: var(--red); text-transform: none; font-family: var(--mono); letter-spacing: 0; }
+.decision td { padding: 6px 10px; border-bottom: 1px solid var(--border); font-family: var(--mono); white-space: nowrap; vertical-align: top; }
+.decision tbody tr:last-child td { border-bottom: none; }
+.decision td.rule { font-family: var(--sans); font-weight: 500; cursor: pointer; }
+.decision td .any { color: var(--text-3); }
+.decision tbody tr.conflict-row td { background: var(--red-soft); }
+.decision td.out { font-weight: 500; }
+.decision tbody tr:hover td { background: var(--accent-soft); }
+.decision tbody tr.conflict-row:hover td { background: var(--red-soft); }
+.decision tr.detail-row td { background: var(--surface-2); font-family: var(--sans); white-space: normal; font-size: 12.5px; color: var(--text-2); }
+.decision tr.detail-row .d-label { font-weight: 600; color: var(--text-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; margin-right: 6px; }
+.decision tr.detail-row .d-red { color: var(--red); }
+.dt-note { font-size: 12.5px; margin: 6px 2px 0; }
+.dt-note.red { color: var(--red); }
+
+@media (max-width: 700px) {
+  .explorer { grid-template-columns: 1fr; }
+  .tree { border-right: none; border-bottom: 1px solid var(--border); max-height: 220px; }
+}
+
 /* ── contract cards (list) ─────────────────────────────────────────────────── */
 
 .contract-card {
