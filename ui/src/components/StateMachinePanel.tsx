@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { ReactFlow, Background, type Node, type Edge } from '@xyflow/react';
+import { ReactFlow, Background, MarkerType, type Node, type Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { StateCoverage } from '../api/types';
 import { fetchLifecycle } from '../api/client';
@@ -11,16 +11,15 @@ type Load =
 
 type Category = 'initial' | 'terminal' | 'isolated' | 'undeclared' | 'normal';
 
-const INK = '#191c21';
 const RED = '#dc2626';
-const PAPER = '#ffffff';
+const INK = '#191c21';
 
 const CATEGORY_STYLE: Record<Category, React.CSSProperties> = {
   initial: { border: `2px solid ${INK}` },
   terminal: { border: `3px double ${INK}` },
-  isolated: { border: `2px dashed ${RED}`, color: RED, fontStyle: 'italic' },
+  isolated: { border: `2px dashed ${RED}`, color: RED },
   undeclared: { border: `2px dotted ${RED}`, color: RED },
-  normal: { border: `1px solid rgba(28,24,20,0.55)` },
+  normal: { border: '1px solid #d3d7de' },
 };
 
 function categorize(state: string, c: StateCoverage): Category {
@@ -31,7 +30,24 @@ function categorize(state: string, c: StateCoverage): Category {
   return 'normal';
 }
 
-function layout(c: StateCoverage): { nodes: Node[]; edges: Edge[] } {
+interface Transition {
+  from: string;
+  to: string;
+  rules: string[]; // full contract keys
+}
+
+function transitionsOf(c: StateCoverage): Transition[] {
+  const m = new Map<string, Transition>();
+  for (const t of c.transitions) {
+    if (!t.from || !t.to) continue;
+    const k = `${t.from}->${t.to}`;
+    if (!m.has(k)) m.set(k, { from: t.from, to: t.to, rules: [] });
+    m.get(k)!.rules.push(t.contract);
+  }
+  return [...m.values()];
+}
+
+function layout(c: StateCoverage): Node[] {
   const allStates = [...c.states, ...c.undeclared_states.filter((s) => !c.states.includes(s))];
   const layer = new Map<string, number>();
   c.no_incoming.forEach((s) => layer.set(s, 0));
@@ -46,86 +62,62 @@ function layout(c: StateCoverage): { nodes: Node[]; edges: Edge[] } {
   allStates.forEach((s) => {
     if (!layer.has(s)) layer.set(s, c.isolated.includes(s) ? maxLayer + 1 : 0);
   });
-
   const perLayer = new Map<number, number>();
-  const nodes: Node[] = allStates.map((s) => {
+  return allStates.map((s) => {
     const l = layer.get(s) ?? 0;
     const idx = perLayer.get(l) ?? 0;
     perLayer.set(l, idx + 1);
     return {
       id: s,
-      position: { x: l * 200 + 24, y: idx * 78 + 24 },
+      position: { x: l * 190 + 20, y: idx * 72 + 20 },
       data: { label: s },
       style: {
         ...CATEGORY_STYLE[categorize(s, c)],
-        background: PAPER,
+        background: '#ffffff',
         color: CATEGORY_STYLE[categorize(s, c)].color ?? INK,
-        borderRadius: 6,
+        borderRadius: 8,
         fontFamily: 'IBM Plex Mono, monospace',
         fontSize: 12,
         padding: '6px 10px',
-        width: 148,
+        width: 140,
       },
     };
   });
-
-  const edges: Edge[] = c.transitions
-    .filter((t) => t.from && t.to)
-    .map((t, i) => ({
-      id: `${t.from}->${t.to}-${i}`,
-      source: t.from!,
-      target: t.to!,
-      label: t.contract.split('/').pop(),
-      labelStyle: { fill: 'rgba(28,24,20,0.7)', fontSize: 11, fontStyle: 'italic', fontFamily: 'IBM Plex Mono, monospace' },
-      labelBgStyle: { fill: PAPER },
-      style: { stroke: 'rgba(28,24,20,0.45)' },
-    }));
-
-  return { nodes, edges };
 }
 
-function CoverageFigure({ c, num }: { c: StateCoverage; num: number }) {
-  const { nodes, edges } = useMemo(() => layout(c), [c]);
-  const transitions = c.transitions.filter((t) => t.from && t.to).length;
-  const flags: string[] = [];
-  if (c.isolated.length) flags.push(`isolated: ${c.isolated.join(', ')}`);
-  if (c.undeclared_states.length) flags.push(`undeclared (from data): ${c.undeclared_states.join(', ')}`);
-  return (
-    <figure className="figure">
-      <div className="figure-frame sm-canvas">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          fitView
-          nodesConnectable={false}
-          proOptions={{ hideAttribution: true }}
-          colorMode="light"
-          aria-label={`Lifecycle of ${c.entity}.${c.state_field}`}
-        >
-          <Background color="#e6e8ec" gap={20} />
-        </ReactFlow>
-      </div>
-      <figcaption className="figcaption">
-        Lifecycle of <code>{c.entity}.{c.state_field}</code> — {c.states.length} declared
-        state{c.states.length !== 1 ? 's' : ''}, {transitions} transition{transitions !== 1 ? 's' : ''}.
-      </figcaption>
-      {flags.length > 0 && <p className="figure-note">{flags.join(' · ')}</p>}
-    </figure>
-  );
-}
+const caseOf = (key: string): string => key.split('/').pop() ?? key;
 
-export default function StateMachinePanel() {
+export default function StateMachinePanel({ onOpenRule }: { onOpenRule?: (key: string) => void }) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
+  const [active, setActive] = useState<string>('');
 
   useEffect(() => {
     fetchLifecycle()
-      .then((data) => setLoad({ kind: 'done', data }))
+      .then((data) => {
+        setLoad({ kind: 'done', data });
+        if (data.length) setActive(`${data[0].entity}.${data[0].state_field}`);
+      })
       .catch((e: unknown) => setLoad({ kind: 'error', message: e instanceof Error ? e.message : String(e) }));
   }, []);
 
+  const current = load.kind === 'done' ? load.data.find((c) => `${c.entity}.${c.state_field}` === active) : undefined;
+  const transitions = useMemo(() => (current ? transitionsOf(current) : []), [current]);
+  const nodes = useMemo(() => (current ? layout(current) : []), [current]);
+  const edges: Edge[] = useMemo(
+    () =>
+      transitions.map((t) => ({
+        id: `${t.from}->${t.to}`,
+        source: t.from,
+        target: t.to,
+        style: { stroke: '#8a919c', strokeWidth: 1.3 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#8a919c', width: 16, height: 16 },
+      })),
+    [transitions],
+  );
+
   if (load.kind === 'loading') return <p className="empty-note">Tracing lifecycles…</p>;
   if (load.kind === 'error') return <p className="empty-note" style={{ color: 'var(--red)' }}>Error: {load.message}</p>;
-  if (load.data.length === 0)
+  if (load.kind === 'done' && load.data.length === 0)
     return (
       <p className="empty-note">
         No state fields declared. Mark an enum field as a <code>state</code> in the glossary
@@ -135,14 +127,76 @@ export default function StateMachinePanel() {
 
   return (
     <div>
-      <p className="section-desc" style={{ fontSize: 15, color: 'var(--text-2)' }}>
-        Legend: solid border — initial (no incoming); double border — terminal (no outgoing);{' '}
-        <span style={{ color: 'var(--red)', fontStyle: 'italic' }}>dashed red — isolated</span> (no rule);{' '}
-        <span style={{ color: 'var(--red)' }}>dotted red — undeclared</span> (seen only in data).
-      </p>
-      {load.data.map((c, i) => (
-        <CoverageFigure key={`${c.entity}.${c.state_field}`} c={c} num={i + 1} />
-      ))}
+      <div className="chips">
+        {load.kind === 'done' &&
+          load.data.map((c) => {
+            const id = `${c.entity}.${c.state_field}`;
+            const bad = c.isolated.length + c.undeclared_states.length;
+            return (
+              <button key={id} className={`chip${active === id ? ' active' : ''}`} onClick={() => setActive(id)}>
+                {c.entity}
+                <span className="chip-sub">.{c.state_field}</span>
+                {bad > 0 && <span className="chip-warn">{bad}</span>}
+              </button>
+            );
+          })}
+      </div>
+
+      {current && (
+        <>
+          <div className="lc-summary">
+            <span><b>{current.states.length}</b> states</span>
+            <span><b>{transitions.length}</b> transitions</span>
+            {current.no_incoming.length > 0 && (
+              <span>initial: <code>{current.no_incoming.join(', ')}</code></span>
+            )}
+            {current.no_outgoing.length > 0 && (
+              <span>terminal: <code>{current.no_outgoing.join(', ')}</code></span>
+            )}
+            {current.isolated.length > 0 && (
+              <span className="lc-bad">isolated: <code>{current.isolated.join(', ')}</code></span>
+            )}
+            {current.undeclared_states.length > 0 && (
+              <span className="lc-bad">undeclared: <code>{current.undeclared_states.join(', ')}</code></span>
+            )}
+          </div>
+
+          <div className="figure-frame sm-canvas">
+            <ReactFlow
+              key={active}
+              nodes={nodes}
+              edges={edges}
+              fitView
+              nodesConnectable={false}
+              proOptions={{ hideAttribution: true }}
+              colorMode="light"
+              aria-label={`Lifecycle of ${current.entity}.${current.state_field}`}
+            >
+              <Background color="#e6e8ec" gap={20} />
+            </ReactFlow>
+          </div>
+
+          <div className="trans-list">
+            {transitions.map((t) => (
+              <div key={`${t.from}->${t.to}`} className="trans-row">
+                <code className="trans-arrow">{t.from} → {t.to}</code>
+                <span className="trans-rules">
+                  {t.rules.map((r, i) => (
+                    <button
+                      key={r}
+                      className="link-btn"
+                      onClick={() => onOpenRule?.(r)}
+                      title="Open in the decision tables"
+                    >
+                      {caseOf(r)}{i < t.rules.length - 1 ? ',' : ''}
+                    </button>
+                  ))}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

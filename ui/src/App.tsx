@@ -36,7 +36,13 @@ const SECTIONS: { view: View; title: string; desc: React.ReactNode }[] = [
   {
     view: 'states',
     title: 'Lifecycles',
-    desc: <>State machines induced by rules that guard on an enum state field. States no rule reaches are flagged.</>,
+    desc: (
+      <>
+        The state machine each entity&rsquo;s rules induce. Pick an entity; the list under the
+        diagram names the rule behind every transition — <span className="bot">isolated</span> states
+        have no rule at all.
+      </>
+    ),
   },
   {
     view: 'proofs',
@@ -167,7 +173,7 @@ export default function App() {
             onSelect={(item) => setSelected(item)}
           />
         )}
-        {view === 'states' && <StateMachinePanel key={project} />}
+        {view === 'states' && <StateMachinePanel key={project} onOpenRule={selectByKey} />}
         {view === 'proofs' && <ProofsPanel key={project} contracts={contracts.items} />}
         {view === 'check' && <CheckPanel />}
         {view === 'history' && <HistoryPanel entries={history} />}

@@ -263,6 +263,26 @@ table.decision { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .rf-node .rf-node-title { font-size: 13px; font-weight: 600; }
 .rf-node .rf-node-sub { font-family: var(--mono); font-size: 10px; color: var(--text-3); margin-top: 2px; }
 
+/* ── lifecycles ────────────────────────────────────────────────────────────── */
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 20px; padding: 4px 12px; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.chip:hover { border-color: var(--accent); }
+.chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-2); font-weight: 500; }
+.chip-sub { color: var(--text-3); font-family: var(--mono); font-size: 11px; }
+.chip-warn { background: var(--red-soft); color: var(--red); font-size: 10px; font-weight: 700; border-radius: 8px; padding: 0 6px; }
+
+.lc-summary { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--text-2); margin: 0 0 10px; }
+.lc-summary b { color: var(--text); }
+.lc-summary .lc-bad { color: var(--red); }
+.lc-summary .lc-bad code { color: var(--red); }
+
+.trans-list { margin: 12px 0 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 14px; }
+.trans-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.trans-row:last-child { border-bottom: none; }
+.trans-arrow { font-size: 12.5px; background: none; border: none; padding: 0; min-width: 220px; }
+.trans-rules { display: inline-flex; flex-wrap: wrap; gap: 6px; font-size: 12.5px; }
+
 /* ── theorems ──────────────────────────────────────────────────────────────── */
 
 .thm-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 14px; font-size: 13px; }
