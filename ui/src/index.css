@@ -243,25 +243,44 @@ table.decision { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 }
 .cc-conflict button { background: none; border: none; color: var(--red); cursor: pointer; font: inherit; font-weight: 600; text-decoration: underline; padding: 0; }
 
-/* ── figures (graph, lifecycles) ───────────────────────────────────────────── */
+/* ── flow (workflow stages, no canvas) ─────────────────────────────────────── */
 
-.figure { margin: 0 0 20px; }
-.figure-frame {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
 .figcaption { margin: 8px 2px 0; font-size: 13px; color: var(--text-3); }
-.figcaption b { color: var(--text-2); font-weight: 600; }
-.figure-note { margin: 6px 2px 0; font-size: 13px; color: var(--red); }
-.graph-canvas { height: min(62vh, 560px); }
-.sm-canvas { height: 360px; }
-.react-flow__attribution { display: none; }
-.rf-node { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); padding: 7px 11px; }
-.rf-node.conflict { border-color: var(--red); }
-.rf-node .rf-node-title { font-size: 13px; font-weight: 600; }
-.rf-node .rf-node-sub { font-family: var(--mono); font-size: 10px; color: var(--text-3); margin-top: 2px; }
+
+.flow { list-style: none; margin: 0; padding: 0; }
+.flow-stage { display: grid; grid-template-columns: 34px 1fr; gap: 0 12px; }
+.flow-marker { display: flex; flex-direction: column; align-items: center; }
+.flow-num { width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-2); font-size: 12px; font-weight: 600; display: grid; place-items: center; flex-shrink: 0; }
+.flow-line { flex: 1; width: 2px; background: var(--border); margin: 4px 0; min-height: 14px; }
+.flow-ops { display: flex; flex-direction: column; gap: 8px; padding: 0 0 18px; }
+.flow-op { text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; transition: border-color 0.12s; }
+.flow-op:hover { border-color: var(--accent); }
+.flow-op.selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.flow-op.conflict { border-left: 3px solid var(--red); }
+.flow-op-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.flow-op-name { font-weight: 600; font-size: 14px; }
+.flow-op-entity { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); }
+.flow-op-rules { margin-left: auto; font-size: 12px; color: var(--text-3); }
+.flow-needs { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.flow-needs .need { font-size: 12px; color: var(--text-2); }
+.flow-needs .need code { font-size: 11.5px; }
+
+/* ── lifecycles (state-transition rows, no canvas) ─────────────────────────── */
+
+.state-rows { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.state-row { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 8px 14px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.state-row:last-child { border-bottom: none; }
+.state-row.cat-isolated, .state-row.cat-undeclared { background: var(--red-soft); }
+.state-cell { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.state-name { font-size: 13px; font-weight: 500; background: none; border: none; padding: 0; }
+.state-tag { font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text-3); }
+.state-tag.cat-isolated, .state-tag.cat-undeclared { color: var(--red); }
+.state-out { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.state-edge { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; }
+.state-edge code { background: none; border: none; padding: 0; font-size: 12.5px; }
+.state-via { display: inline-flex; flex-wrap: wrap; gap: 6px; font-size: 12.5px; }
+.state-none { font-size: 12.5px; color: var(--text-3); font-style: italic; }
+.state-row.cat-isolated .state-none, .state-row.cat-undeclared .state-none { color: var(--red); font-style: normal; }
 
 /* ── lifecycles ────────────────────────────────────────────────────────────── */
 
@@ -345,6 +364,7 @@ table.decision { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 
 @media (max-width: 680px) {
   .topbar .tagline { display: none; }
+  .state-row { grid-template-columns: 1fr; gap: 4px; }
   .thm-layout { grid-template-columns: 1fr; }
   .thm-nav { max-height: 240px; overflow-y: auto; }
   .thm-nav button { width: 100%; }

@@ -1,8 +1,10 @@
 import { useEffect, useState, useMemo } from 'react';
-import { ReactFlow, Background, MarkerType, type Node, type Edge } from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
 import type { StateCoverage } from '../api/types';
 import { fetchLifecycle } from '../api/client';
+
+/* Lifecycles without a canvas: the classic FSM *state-transition table* form —
+   one row per state, its outgoing transitions as links. Concise, complete,
+   unambiguous (Wiegers), and it reads top-to-bottom on a phone. */
 
 type Load =
   | { kind: 'loading' }
@@ -10,17 +12,6 @@ type Load =
   | { kind: 'error'; message: string };
 
 type Category = 'initial' | 'terminal' | 'isolated' | 'undeclared' | 'normal';
-
-const RED = '#dc2626';
-const INK = '#191c21';
-
-const CATEGORY_STYLE: Record<Category, React.CSSProperties> = {
-  initial: { border: `2px solid ${INK}` },
-  terminal: { border: `3px double ${INK}` },
-  isolated: { border: `2px dashed ${RED}`, color: RED },
-  undeclared: { border: `2px dotted ${RED}`, color: RED },
-  normal: { border: '1px solid #d3d7de' },
-};
 
 function categorize(state: string, c: StateCoverage): Category {
   if (c.undeclared_states.includes(state)) return 'undeclared';
@@ -30,62 +21,20 @@ function categorize(state: string, c: StateCoverage): Category {
   return 'normal';
 }
 
-interface Transition {
-  from: string;
-  to: string;
-  rules: string[]; // full contract keys
-}
-
-function transitionsOf(c: StateCoverage): Transition[] {
-  const m = new Map<string, Transition>();
-  for (const t of c.transitions) {
-    if (!t.from || !t.to) continue;
-    const k = `${t.from}->${t.to}`;
-    if (!m.has(k)) m.set(k, { from: t.from, to: t.to, rules: [] });
-    m.get(k)!.rules.push(t.contract);
-  }
-  return [...m.values()];
-}
-
-function layout(c: StateCoverage): Node[] {
-  const allStates = [...c.states, ...c.undeclared_states.filter((s) => !c.states.includes(s))];
-  const layer = new Map<string, number>();
-  c.no_incoming.forEach((s) => layer.set(s, 0));
-  for (let pass = 0; pass < allStates.length + 1; pass++) {
-    for (const t of c.transitions) {
-      if (!t.from || !t.to) continue;
-      const lf = layer.get(t.from) ?? 0;
-      if ((layer.get(t.to) ?? -1) < lf + 1) layer.set(t.to, lf + 1);
-    }
-  }
-  const maxLayer = Math.max(0, ...[...layer.values()]);
-  allStates.forEach((s) => {
-    if (!layer.has(s)) layer.set(s, c.isolated.includes(s) ? maxLayer + 1 : 0);
-  });
-  const perLayer = new Map<number, number>();
-  return allStates.map((s) => {
-    const l = layer.get(s) ?? 0;
-    const idx = perLayer.get(l) ?? 0;
-    perLayer.set(l, idx + 1);
-    return {
-      id: s,
-      position: { x: l * 190 + 20, y: idx * 72 + 20 },
-      data: { label: s },
-      style: {
-        ...CATEGORY_STYLE[categorize(s, c)],
-        background: '#ffffff',
-        color: CATEGORY_STYLE[categorize(s, c)].color ?? INK,
-        borderRadius: 8,
-        fontFamily: 'IBM Plex Mono, monospace',
-        fontSize: 12,
-        padding: '6px 10px',
-        width: 140,
-      },
-    };
-  });
-}
+const CATEGORY_LABEL: Record<Category, string | null> = {
+  initial: 'initial',
+  terminal: 'terminal',
+  isolated: 'isolated — no rule',
+  undeclared: 'undeclared — seen only in data',
+  normal: null,
+};
 
 const caseOf = (key: string): string => key.split('/').pop() ?? key;
+
+interface Outgoing {
+  to: string;
+  rules: string[];
+}
 
 export default function StateMachinePanel({ onOpenRule }: { onOpenRule?: (key: string) => void }) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
@@ -101,19 +50,43 @@ export default function StateMachinePanel({ onOpenRule }: { onOpenRule?: (key: s
   }, []);
 
   const current = load.kind === 'done' ? load.data.find((c) => `${c.entity}.${c.state_field}` === active) : undefined;
-  const transitions = useMemo(() => (current ? transitionsOf(current) : []), [current]);
-  const nodes = useMemo(() => (current ? layout(current) : []), [current]);
-  const edges: Edge[] = useMemo(
-    () =>
-      transitions.map((t) => ({
-        id: `${t.from}->${t.to}`,
-        source: t.from,
-        target: t.to,
-        style: { stroke: '#8a919c', strokeWidth: 1.3 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#8a919c', width: 16, height: 16 },
-      })),
-    [transitions],
-  );
+
+  // One row per state, in workflow order (initial states first, by reachability).
+  const rows = useMemo(() => {
+    if (!current) return [];
+    const all = [...current.states, ...current.undeclared_states.filter((s) => !current.states.includes(s))];
+    const outgoing = new Map<string, Map<string, string[]>>();
+    for (const t of current.transitions) {
+      if (!t.from || !t.to) continue;
+      if (!outgoing.has(t.from)) outgoing.set(t.from, new Map());
+      const m = outgoing.get(t.from)!;
+      if (!m.has(t.to)) m.set(t.to, []);
+      m.get(t.to)!.push(t.contract);
+    }
+    // Order: BFS layers from initial states, then leftovers (isolated last).
+    const layer = new Map<string, number>();
+    current.no_incoming.forEach((s) => layer.set(s, 0));
+    for (let pass = 0; pass < all.length + 1; pass++) {
+      for (const t of current.transitions) {
+        if (!t.from || !t.to) continue;
+        const lf = layer.get(t.from) ?? 0;
+        if ((layer.get(t.to) ?? -1) < lf + 1) layer.set(t.to, lf + 1);
+      }
+    }
+    const ordered = [...all].sort((a, b) => {
+      const ia = current.isolated.includes(a) ? 1 : 0;
+      const ib = current.isolated.includes(b) ? 1 : 0;
+      if (ia !== ib) return ia - ib;
+      return (layer.get(a) ?? 99) - (layer.get(b) ?? 99) || a.localeCompare(b);
+    });
+    return ordered.map((s) => ({
+      state: s,
+      category: categorize(s, current),
+      out: [...(outgoing.get(s) ?? new Map<string, string[]>()).entries()].map(
+        ([to, rules]): Outgoing => ({ to, rules }),
+      ),
+    }));
+  }, [current]);
 
   if (load.kind === 'loading') return <p className="empty-note">Tracing lifecycles…</p>;
   if (load.kind === 'error') return <p className="empty-note" style={{ color: 'var(--red)' }}>Error: {load.message}</p>;
@@ -124,6 +97,10 @@ export default function StateMachinePanel({ onOpenRule }: { onOpenRule?: (key: s
         (a <code>states:</code> section) to trace its lifecycle here.
       </p>
     );
+
+  const nTrans = current
+    ? new Set(current.transitions.filter((t) => t.from && t.to).map((t) => `${t.from}->${t.to}`)).size
+    : 0;
 
   return (
     <div>
@@ -146,13 +123,7 @@ export default function StateMachinePanel({ onOpenRule }: { onOpenRule?: (key: s
         <>
           <div className="lc-summary">
             <span><b>{current.states.length}</b> states</span>
-            <span><b>{transitions.length}</b> transitions</span>
-            {current.no_incoming.length > 0 && (
-              <span>initial: <code>{current.no_incoming.join(', ')}</code></span>
-            )}
-            {current.no_outgoing.length > 0 && (
-              <span>terminal: <code>{current.no_outgoing.join(', ')}</code></span>
-            )}
+            <span><b>{nTrans}</b> transitions</span>
             {current.isolated.length > 0 && (
               <span className="lc-bad">isolated: <code>{current.isolated.join(', ')}</code></span>
             )}
@@ -161,37 +132,42 @@ export default function StateMachinePanel({ onOpenRule }: { onOpenRule?: (key: s
             )}
           </div>
 
-          <div className="figure-frame sm-canvas">
-            <ReactFlow
-              key={active}
-              nodes={nodes}
-              edges={edges}
-              fitView
-              nodesConnectable={false}
-              proOptions={{ hideAttribution: true }}
-              colorMode="light"
-              aria-label={`Lifecycle of ${current.entity}.${current.state_field}`}
-            >
-              <Background color="#e6e8ec" gap={20} />
-            </ReactFlow>
-          </div>
-
-          <div className="trans-list">
-            {transitions.map((t) => (
-              <div key={`${t.from}->${t.to}`} className="trans-row">
-                <code className="trans-arrow">{t.from} → {t.to}</code>
-                <span className="trans-rules">
-                  {t.rules.map((r, i) => (
-                    <button
-                      key={r}
-                      className="link-btn"
-                      onClick={() => onOpenRule?.(r)}
-                      title="Open in the decision tables"
-                    >
-                      {caseOf(r)}{i < t.rules.length - 1 ? ',' : ''}
-                    </button>
-                  ))}
-                </span>
+          <div className="state-rows">
+            {rows.map((r) => (
+              <div key={r.state} className={`state-row cat-${r.category}`}>
+                <div className="state-cell">
+                  <code className="state-name">{r.state}</code>
+                  {CATEGORY_LABEL[r.category] && (
+                    <span className={`state-tag cat-${r.category}`}>{CATEGORY_LABEL[r.category]}</span>
+                  )}
+                </div>
+                <div className="state-out">
+                  {r.out.length === 0 ? (
+                    <span className="state-none">
+                      {r.category === 'isolated' || r.category === 'undeclared'
+                        ? 'no rule reaches or leaves this state'
+                        : 'no outgoing transitions'}
+                    </span>
+                  ) : (
+                    r.out.map((o) => (
+                      <div key={o.to} className="state-edge">
+                        <code>→ {o.to}</code>
+                        <span className="state-via">
+                          {o.rules.map((rk, i) => (
+                            <button
+                              key={rk}
+                              className="link-btn"
+                              onClick={() => onOpenRule?.(rk)}
+                              title="Open in the decision tables"
+                            >
+                              {caseOf(rk)}{i < o.rules.length - 1 ? ',' : ''}
+                            </button>
+                          ))}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             ))}
           </div>

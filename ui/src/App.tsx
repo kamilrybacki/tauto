@@ -24,12 +24,12 @@ const SECTIONS: { view: View; title: string; desc: React.ReactNode }[] = [
   },
   {
     view: 'graph',
-    title: 'Graph',
+    title: 'Flow',
     desc: (
       <>
-        Decision points (operations) in entity swimlanes. Edges are gates derived from snapshot
-        guards — what must hold elsewhere before an operation can fire. <span className="bot">⊥</span>{' '}
-        marks operations with contradictory rules.
+        The workflow as ordered stages. Each operation lists what must hold elsewhere before it can
+        fire (gates derived from snapshot guards); <span className="bot">⊥</span> marks operations
+        with contradictory rules. Tap one to open its decision table.
       </>
     ),
   },
@@ -38,9 +38,9 @@ const SECTIONS: { view: View; title: string; desc: React.ReactNode }[] = [
     title: 'Lifecycles',
     desc: (
       <>
-        The state machine each entity&rsquo;s rules induce. Pick an entity; the list under the
-        diagram names the rule behind every transition — <span className="bot">isolated</span> states
-        have no rule at all.
+        Each entity&rsquo;s states, one row per state, with the transitions its rules allow —{' '}
+        <span className="bot">isolated</span> states have no rule at all. Every transition links to
+        the rule behind it.
       </>
     ),
   },
