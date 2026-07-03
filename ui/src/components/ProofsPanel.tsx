@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ProofsResponse, LeanFile } from '../api/types';
+import type { ProofsResponse, LeanFile, ContractItem } from '../api/types';
 import { fetchProofs } from '../api/client';
 
 type State =
@@ -10,7 +10,10 @@ type State =
 
 const CONTRACTS_DIR = 'TautoContracts/contracts/';
 
-export default function ProofsPanel() {
+/** Lean module names are the case name stripped to alphanumerics. */
+const norm = (s: string): string => s.replace(/[^a-zA-Z0-9]/g, '');
+
+export default function ProofsPanel({ contracts = [] }: { contracts?: ContractItem[] }) {
   const [state, setState] = useState<State>({ kind: 'idle' });
   const [selected, setSelected] = useState<LeanFile | null>(null);
 
@@ -45,6 +48,23 @@ export default function ProofsPanel() {
   const proven = data.build_available && data.build_success;
   const isContractThm = selected?.path.startsWith(CONTRACTS_DIR) ?? false;
 
+  // Group contract files by entity via the rule set (module name = case name).
+  const entityOf = new Map(contracts.map((c) => [norm(c.case), c.entity]));
+  const groups = new Map<string, LeanFile[]>();
+  for (const f of contractFiles) {
+    const stem = f.path.replace(CONTRACTS_DIR, '').replace(/\.lean$/, '');
+    const ent = entityOf.get(norm(stem)) ?? 'Contracts';
+    if (!groups.has(ent)) groups.set(ent, []);
+    groups.get(ent)!.push(f);
+  }
+  const hasTheorems = (f: LeanFile) => f.content.includes('theorem ');
+  const fileBtn = (f: LeanFile, label: string) => (
+    <button key={f.path} className={selected?.path === f.path ? 'active' : ''} onClick={() => setSelected(f)}>
+      {label}
+      {proven && hasTheorems(f) && <span className="thm-qed">∎</span>}
+    </button>
+  );
+
   return (
     <div>
       <div className="thm-status">
@@ -69,26 +89,14 @@ export default function ProofsPanel() {
 
       <div className="thm-layout">
         <nav className="thm-nav" aria-label="Workspace files">
-          {contractFiles.length > 0 && <div className="grp">Contracts</div>}
-          {contractFiles.map((f) => (
-            <button
-              key={f.path}
-              className={selected?.path === f.path ? 'active' : ''}
-              onClick={() => setSelected(f)}
-            >
-              {f.path.replace(CONTRACTS_DIR, '')}
-            </button>
+          {[...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([ent, files]) => (
+            <div key={ent}>
+              <div className="grp">{ent}</div>
+              {files.map((f) => fileBtn(f, f.path.replace(CONTRACTS_DIR, '').replace(/\.lean$/, '')))}
+            </div>
           ))}
           {infraFiles.length > 0 && <div className="grp">Workspace</div>}
-          {infraFiles.map((f) => (
-            <button
-              key={f.path}
-              className={selected?.path === f.path ? 'active' : ''}
-              onClick={() => setSelected(f)}
-            >
-              {f.path}
-            </button>
-          ))}
+          {infraFiles.map((f) => fileBtn(f, f.path.replace('TautoContracts/', '')))}
         </nav>
         <div className="thm-listing">
           {selected && (

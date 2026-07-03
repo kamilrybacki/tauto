@@ -27,8 +27,9 @@ const SECTIONS: { view: View; title: string; desc: React.ReactNode }[] = [
     title: 'Graph',
     desc: (
       <>
-        The rule set as a dependency graph — grouped by entity and operation, with candidate{' '}
-        <span className="bot">contradictions</span> highlighted.
+        Decision points (operations) in entity swimlanes. Edges are gates derived from snapshot
+        guards — what must hold elsewhere before an operation can fire. <span className="bot">⊥</span>{' '}
+        marks operations with contradictory rules.
       </>
     ),
   },
@@ -150,7 +151,13 @@ export default function App() {
         <p className="section-desc">{active.desc}</p>
 
         {view === 'graph' && (
-          <ContractGraph graph={graph} slug={project} selected={selected?.key ?? null} onSelect={selectByKey} />
+          <ContractGraph
+            graph={graph}
+            contracts={contracts.items}
+            slug={project}
+            selected={selected?.key ?? null}
+            onSelect={selectByKey}
+          />
         )}
         {view === 'list' && (
           <ContractList
@@ -161,7 +168,7 @@ export default function App() {
           />
         )}
         {view === 'states' && <StateMachinePanel key={project} />}
-        {view === 'proofs' && <ProofsPanel key={project} />}
+        {view === 'proofs' && <ProofsPanel key={project} contracts={contracts.items} />}
         {view === 'check' && <CheckPanel />}
         {view === 'history' && <HistoryPanel entries={history} />}
       </main>

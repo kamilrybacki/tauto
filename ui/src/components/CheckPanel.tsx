@@ -72,7 +72,14 @@ export default function CheckPanel() {
   return (
     <div>
       <div className="referee-form">
-        <span className="small-caps" style={{ fontSize: 14.5 }}>manuscript under review</span>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+          <span className="small-caps">proposed rule</span>
+          {!content && (
+            <button className="link-btn" style={{ fontSize: 13 }} onClick={() => setContent(PLACEHOLDER)}>
+              insert a template
+            </button>
+          )}
+        </div>
         <textarea
           className="referee-textarea"
           value={content}
