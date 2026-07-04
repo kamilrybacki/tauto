@@ -221,14 +221,25 @@ function DecisionTable({
       <div className="dt-scroll">
         <table className="decision">
           <thead>
+            <tr className="grouprow">
+              <th rowSpan={2}>Rule</th>
+              <th colSpan={Math.max(columns.length, 1)} className="group">
+                When — before <code>{operation}</code> may run
+              </th>
+              <th rowSpan={2} className="out">
+                Then — the result of <code>{operation}</code>
+              </th>
+            </tr>
             <tr>
-              <th>Rule</th>
-              {columns.map((c) => (
-                <th key={c.path} className={c.warn ? 'warncol' : ''}>
-                  {c.label}
-                </th>
-              ))}
-              <th className="out">→ ensures</th>
+              {columns.length ? (
+                columns.map((c) => (
+                  <th key={c.path} className={c.warn ? 'warncol' : ''}>
+                    {c.label}
+                  </th>
+                ))
+              ) : (
+                <th className="anycol">always</th>
+              )}
             </tr>
           </thead>
           <tbody>
