@@ -451,6 +451,53 @@ struct ProofsResponse {
     build_stderr: String,
 }
 
+/// Run the Lean build for a generated workspace. Prefers a remote build service
+/// (any deployment implementing the build contract) when TAUTO_LAKE_URL is set;
+/// else a local `lake` on PATH; else reports unavailable. Service errors degrade
+/// gracefully to available=false — never a 500, so a slow/down builder can't
+/// hang the request or trip the liveness probe.
+async fn execute_build(
+    workspace: crate::lean_gen::LeanWorkspace,
+) -> Result<(bool, LakeBuildResult), (StatusCode, Json<serde_json::Value>)> {
+    let build_dir = tempfile::tempdir().map_err(|e| api_err(e.to_string()))?;
+    let build_path = build_dir.path().to_path_buf();
+    let lake_url = std::env::var("TAUTO_LAKE_URL").ok();
+    tokio::task::spawn_blocking(move || {
+        if let Some(url) = lake_url {
+            return match run_lake_build_remote(&url, &workspace, Duration::from_secs(180)) {
+                Ok(r) => (true, r),
+                Err(e) => (
+                    false,
+                    LakeBuildResult {
+                        success: false,
+                        stdout: String::new(),
+                        stderr: format!("lake build service unavailable: {e}"),
+                    },
+                ),
+            };
+        }
+        if let Err(e) = write_lean_workspace(&workspace, &build_path) {
+            return (
+                false,
+                LakeBuildResult { success: false, stdout: String::new(), stderr: e.to_string() },
+            );
+        }
+        match run_lake_build(&build_path) {
+            Ok(r) => (true, r),
+            Err(_) => (
+                false,
+                LakeBuildResult {
+                    success: false,
+                    stdout: String::new(),
+                    stderr: "lake not found in PATH — set TAUTO_LAKE_URL to a Lean build service, or install Lean 4 via elan".to_owned(),
+                },
+            ),
+        }
+    })
+    .await
+    .map_err(|e| api_err(e.to_string()))
+}
+
 async fn handle_proofs(
     State(state): State<Arc<ServerState>>,
     Query(pq): Query<ProjectQuery>,
@@ -482,51 +529,7 @@ async fn handle_proofs(
         .map(|f| LeanFileEntry { path: f.path.clone(), content: f.content.clone() })
         .collect();
 
-    let build_dir = tempfile::tempdir().map_err(|e| api_err(e.to_string()))?;
-    let build_path = build_dir.path().to_path_buf();
-    let workspace_clone = workspace;
-    // Prefer a remote Lean build service (any deployment implementing the build
-    // contract) when TAUTO_LAKE_URL is set; else fall back to a local `lake` on
-    // PATH; else report unavailable. Service errors degrade gracefully to
-    // build_available=false — never a 500, so a slow/down builder can't hang the
-    // proofs request or trip the liveness probe.
-    let lake_url = std::env::var("TAUTO_LAKE_URL").ok();
-
-    let (build_available, result): (bool, LakeBuildResult) =
-        tokio::task::spawn_blocking(move || {
-            if let Some(url) = lake_url {
-                return match run_lake_build_remote(&url, &workspace_clone, Duration::from_secs(180)) {
-                    Ok(r) => (true, r),
-                    Err(e) => (
-                        false,
-                        LakeBuildResult {
-                            success: false,
-                            stdout: String::new(),
-                            stderr: format!("lake build service unavailable: {e}"),
-                        },
-                    ),
-                };
-            }
-            if let Err(e) = write_lean_workspace(&workspace_clone, &build_path) {
-                return (
-                    false,
-                    LakeBuildResult { success: false, stdout: String::new(), stderr: e.to_string() },
-                );
-            }
-            match run_lake_build(&build_path) {
-                Ok(r) => (true, r),
-                Err(_) => (
-                    false,
-                    LakeBuildResult {
-                        success: false,
-                        stdout: String::new(),
-                        stderr: "lake not found in PATH — set TAUTO_LAKE_URL to a Lean build service, or install Lean 4 via elan".to_owned(),
-                    },
-                ),
-            }
-        })
-        .await
-        .map_err(|e| api_err(e.to_string()))?;
+    let (build_available, result) = execute_build(workspace).await?;
 
     let build_success = result.success;
     let build_stdout = result.stdout;
@@ -540,6 +543,135 @@ async fn handle_proofs(
         build_success,
         build_stdout,
         build_stderr,
+    }))
+}
+
+// ── /api/v1/report ────────────────────────────────────────────────────────────
+
+/// The unified verification report: per rule — its machine-checked proof
+/// obligations (with build status), generated test cases, conformance vs its
+/// own examples, and dead-rule/conflict findings. One machine-readable object
+/// shared by the UI and LLMs (via the MCP get_verification_report tool), so
+/// nobody has to parse Lean text.
+#[derive(Serialize)]
+struct ReportRule {
+    key: String,
+    entity: String,
+    operation: String,
+    case: String,
+    obligations: Vec<ReportObligation>,
+    tests: Vec<test_gen::TestCase>,
+    conformance: Vec<crate::conformance::ExampleOutcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dead_rule: Option<crate::deadrule::DeadRule>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    conflicts: Vec<ConflictInfo>,
+}
+
+#[derive(Serialize)]
+struct ReportObligation {
+    theorem: String,
+    kind: String,
+    statement: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pair: Option<String>,
+    /// True when the workspace built cleanly (workspaces are sorry-free, so a
+    /// clean build discharges every obligation; Lake reports one bit per build).
+    discharged: bool,
+}
+
+#[derive(Serialize)]
+struct ReportResponse {
+    build_available: bool,
+    build_success: bool,
+    build_stderr: String,
+    rules: Vec<ReportRule>,
+    obligations_total: usize,
+    /// The generated Lean sources, for display alongside the obligations.
+    files: Vec<LeanFileEntry>,
+}
+
+async fn handle_report(
+    State(state): State<Arc<ServerState>>,
+    Query(pq): Query<ProjectQuery>,
+) -> ApiResult<ReportResponse> {
+    let contracts_path = state.project_path(pq.project.as_deref())?;
+    let (cs, _, _) = scan_path(&contracts_path).map_err(api_err)?;
+    if cs.contracts.is_empty() {
+        return Ok(Json(ReportResponse {
+            build_available: false,
+            build_success: false,
+            build_stderr: "No contracts loaded.".to_owned(),
+            rules: vec![],
+            obligations_total: 0,
+            files: vec![],
+        }));
+    }
+
+    let workspace = generate_lean_workspace(&cs);
+    let obligations = workspace.obligations.clone();
+    let files: Vec<LeanFileEntry> = workspace
+        .files
+        .iter()
+        .map(|f| LeanFileEntry { path: f.path.clone(), content: f.content.clone() })
+        .collect();
+    let (build_available, result) = execute_build(workspace).await?;
+    let discharged = build_available && result.success;
+
+    // Compose the per-rule pieces from the existing engines.
+    let suites = test_gen::generate_suite(&cs);
+    let conformance = crate::conformance::check_examples(&cs.contracts);
+    let dead = crate::deadrule::find_dead_rules(&cs.contracts);
+    let conflicts = find_conflict_candidates(&cs);
+
+    let rules = cs
+        .contracts
+        .iter()
+        .map(|c| {
+            let key = contract_key(c);
+            ReportRule {
+                key: key.clone(),
+                entity: c.entity.clone(),
+                operation: c.operation.clone(),
+                case: c.case.clone(),
+                obligations: obligations
+                    .iter()
+                    .filter(|o| o.key == key)
+                    .map(|o| ReportObligation {
+                        theorem: o.theorem.clone(),
+                        kind: o.kind.clone(),
+                        statement: o.statement.clone(),
+                        pair: o.pair.clone(),
+                        discharged,
+                    })
+                    .collect(),
+                tests: suites
+                    .iter()
+                    .filter(|s| s.contract == key)
+                    .flat_map(|s| s.cases.clone())
+                    .collect(),
+                conformance: conformance.iter().filter(|o| o.case == c.case).cloned().collect(),
+                dead_rule: dead.iter().find(|d| d.key == key).cloned(),
+                conflicts: conflicts
+                    .iter()
+                    .filter(|cf| cf.key_a == key || cf.key_b == key)
+                    .map(|cf| ConflictInfo {
+                        key_a: cf.key_a.clone(),
+                        key_b: cf.key_b.clone(),
+                        reason: cf.reason.clone(),
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+
+    Ok(Json(ReportResponse {
+        build_available,
+        build_success: result.success,
+        build_stderr: result.stderr,
+        rules,
+        obligations_total: obligations.len(),
+        files,
     }))
 }
 
@@ -1059,6 +1191,7 @@ async fn serve_inner(
         .route("/api/v1/graph", get(handle_graph))
         .route("/api/v1/history", get(handle_history))
         .route("/api/v1/proofs", get(handle_proofs))
+        .route("/api/v1/report", get(handle_report))
         .route("/api/v1/check", post(handle_check))
         .route("/api/v1/translate", post(handle_translate))
         .route("/api/v1/glossary", get(handle_glossary))

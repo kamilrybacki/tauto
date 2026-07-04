@@ -149,6 +149,37 @@ export interface CheckResponse {
   };
 }
 
+// ── verification report ─────────────────────────────────────────────────────────
+
+export interface ReportObligation {
+  theorem: string;
+  kind: 'satisfiability' | 'guards_disjoint' | 'outcome_conflict' | 'dead_rule';
+  statement: string;
+  pair?: string;
+  discharged: boolean;
+}
+
+export interface ReportRule {
+  key: string;
+  entity: string;
+  operation: string;
+  case: string;
+  obligations: ReportObligation[];
+  tests: TestCase[];
+  conformance: ExampleOutcome[];
+  dead_rule?: DeadRule;
+  conflicts?: ConflictInfo[];
+}
+
+export interface ReportResponse {
+  build_available: boolean;
+  build_success: boolean;
+  build_stderr: string;
+  rules: ReportRule[];
+  obligations_total: number;
+  files: LeanFile[];
+}
+
 // ── projects ────────────────────────────────────────────────────────────────────
 
 export interface ProjectInfo {

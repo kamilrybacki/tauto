@@ -493,6 +493,7 @@ tauto serve ./rules --port 4000
     <tr><td><code>GET /api/v1/graph</code></td><td>Contract graph: nodes plus <code>same_op</code> and <code>conflict</code> edges.</td></tr>
     <tr><td><code>POST /api/v1/contracts/upload</code></td><td>Persist a rule file. Returns <code>409</code> and rolls back if it introduces a conflict.</td></tr>
     <tr><td><code>GET /api/v1/history</code></td><td>Chronological log of upload attempts and their outcomes.</td></tr>
+    <tr><td><code>GET /api/v1/report</code></td><td>Unified verification report: per rule, Lean proof obligations (kind, statement, discharged), generated tests, conformance, dead-rule/conflict findings. Same JSON via MCP <code>get_verification_report</code>.</td></tr>
     <tr><td><code>GET /api/v1/proofs</code></td><td>Generate the Lean workspace and run <code>lake build</code> on demand.</td></tr>
     <tr><td><code>POST /api/v1/translate</code></td><td>SLM prose&rarr;DSL translation (pluggable provider; stub by default). Returns reviewable DSL — writes nothing, proves nothing.</td></tr>
     <tr><td><code>POST /api/v1/check</code></td><td>Dry-run validation of a proposed rule: compatibility (conflicts), <em>conformance</em> (rule vs its own <code>examples</code> = correctness vs intent), tests, and glossary warnings. Writes nothing.</td></tr>

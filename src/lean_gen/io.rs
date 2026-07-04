@@ -81,7 +81,7 @@ mod tests {
     #[test]
     fn duplicate_paths_returns_error_before_writing() {
         let dir = tempfile::tempdir().unwrap();
-        let ws = LeanWorkspace {
+        let ws = LeanWorkspace { obligations: vec![],
             files: vec![
                 LeanWorkspaceFile { path: "dup.lean".to_owned(), content: "a".to_owned() },
                 LeanWorkspaceFile { path: "dup.lean".to_owned(), content: "b".to_owned() },

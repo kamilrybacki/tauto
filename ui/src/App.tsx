@@ -174,7 +174,7 @@ export default function App() {
           />
         )}
         {view === 'states' && <StateMachinePanel key={project} onOpenRule={selectByKey} />}
-        {view === 'proofs' && <ProofsPanel key={project} contracts={contracts.items} />}
+        {view === 'proofs' && <ProofsPanel key={project} />}
         {view === 'check' && <CheckPanel />}
         {view === 'history' && <HistoryPanel entries={history} />}
       </main>

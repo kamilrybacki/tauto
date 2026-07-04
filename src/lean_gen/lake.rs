@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn remote_build_errors_gracefully_on_unreachable_endpoint() {
-        let ws = LeanWorkspace { files: vec![] };
+        let ws = LeanWorkspace { files: vec![], obligations: vec![] };
         // Port 1 is unbound — connection must fail as Err, not panic/hang.
         let out = run_lake_build_remote("http://127.0.0.1:1/build", &ws, Duration::from_millis(500));
         assert!(out.is_err());

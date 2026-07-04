@@ -5,6 +5,7 @@ import type {
   HistoryResponse,
   ProjectsResponse,
   ProofsResponse,
+  ReportResponse,
   StateCoverage,
 } from './types';
 
@@ -55,6 +56,9 @@ export const fetchHistory = (): Promise<HistoryResponse> =>
 
 export const fetchProofs = (): Promise<ProofsResponse> =>
   get<ProofsResponse>('/api/v1/proofs');
+
+export const fetchReport = (): Promise<ReportResponse> =>
+  get<ReportResponse>('/api/v1/report');
 
 export const fetchLifecycle = (): Promise<StateCoverage[]> =>
   get<StateCoverage[]>('/api/v1/lifecycle');

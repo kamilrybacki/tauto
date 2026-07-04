@@ -96,7 +96,7 @@ mod tests {
     fn scan_flags_sorry_in_generated_workspace() {
         // The scanner flags `sorry` wherever it appears. Generated workspaces are
         // now sorry-free (real proofs), so test the scanner on an explicit stub.
-        let ws = LeanWorkspace {
+        let ws = LeanWorkspace { obligations: vec![],
             files: vec![lean_file(
                 "TautoContracts/contracts/CancelPaidOrder.lean",
                 "theorem t : True := by sorry\n",
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn scan_reports_file_path_in_diagnostic() {
-        let ws = LeanWorkspace {
+        let ws = LeanWorkspace { obligations: vec![],
             files: vec![lean_file(
                 "TautoContracts/contracts/CancelPaidOrder.lean",
                 "theorem t : True := by sorry\n",
@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn scan_returns_one_diagnostic_per_sorry() {
-        let ws = LeanWorkspace {
+        let ws = LeanWorkspace { obligations: vec![],
             files: vec![lean_file(
                 "a.lean",
                 "theorem a : True := by sorry\ntheorem b : True := by sorry\n",
@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn scan_clean_file_returns_no_diagnostics() {
-        let ws = LeanWorkspace {
+        let ws = LeanWorkspace { obligations: vec![],
             files: vec![lean_file(
                 "contracts/Clean.lean",
                 "namespace Tauto.Contracts.Clean\n\nend Tauto.Contracts.Clean\n",
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn scan_detects_axiom_token() {
-        let ws = LeanWorkspace {
+        let ws = LeanWorkspace { obligations: vec![],
             files: vec![lean_file(
                 "contracts/Axiomatic.lean",
                 "namespace Tauto\naxiom bad_axiom : True\nend Tauto\n",
@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn scan_detects_native_decide() {
-        let ws = LeanWorkspace {
+        let ws = LeanWorkspace { obligations: vec![],
             files: vec![lean_file(
                 "contracts/Native.lean",
                 "namespace Tauto\nexample : 1 + 1 = 2 := by native_decide\nend Tauto\n",
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn scan_detects_unsafe_keyword() {
-        let ws = LeanWorkspace {
+        let ws = LeanWorkspace { obligations: vec![],
             files: vec![lean_file(
                 "contracts/Unsafe.lean",
                 "namespace Tauto\nunsafe def bad : Nat := 0\nend Tauto\n",
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn scan_skips_non_lean_files() {
-        let ws = LeanWorkspace {
+        let ws = LeanWorkspace { obligations: vec![],
             files: vec![lean_file("lakefile.toml", "# config\nsorry = 'value'\n")],
         };
         assert!(scan_lean_workspace(&ws).is_empty());
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn scan_does_not_trigger_on_identifier_containing_token() {
         // "unsafeMethod" must NOT trigger "unsafe" token
-        let ws = LeanWorkspace {
+        let ws = LeanWorkspace { obligations: vec![],
             files: vec![lean_file(
                 "contracts/Safe.lean",
                 "namespace Tauto\ndef unsafeMethod : Nat := 0\nend Tauto\n",

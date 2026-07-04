@@ -225,6 +225,17 @@ contracts to LLMs (`list_contracts`, `search_contracts`, `find_conflicts`,
 a proposed rule). The `.claude/skills/tauto-rules/` skill drives the full loop:
 converse about a new rule, translate it to the DSL, and check it via `check_rule`.
 
+## The verification report (unified artifact for UIs and LLMs)
+
+`GET /api/v1/report` (MCP `get_verification_report`) is the single
+machine-readable object tying everything together — per rule: its **Lean proof
+obligations** (theorem, kind — `satisfiability` / `guards_disjoint` /
+`outcome_conflict` / `dead_rule` — the proved statement, and whether the build
+discharged it), the **generated test cases**, **conformance** against the
+rule's own examples, and any dead-rule/conflict findings. The obligations are
+emitted as metadata by the generator itself, so consumers never parse Lean.
+The Proofs tab renders this report; agents get the identical JSON over MCP.
+
 ## Lean build service (Proofs compilation)
 
 The Proofs panel's `lake build` runs in a **separate, pluggable build service**,

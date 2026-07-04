@@ -242,6 +242,12 @@ fn tool_definitions() -> Value {
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
+            "name": "get_verification_report",
+            "title": "Unified verification report",
+            "description": "Return the machine-readable verification report for the whole rule set: per rule, its Lean proof obligations (theorem name, kind — satisfiability / guards_disjoint / outcome_conflict / dead_rule — the proved statement, and whether the build discharged it), the generated test cases, conformance vs the rule's own examples, and any dead-rule/conflict findings. This is the unified artifact — do NOT parse Lean source; use this. Triggers a Lean build (may take ~10-60s).",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
             "name": "translate_rule",
             "title": "Translate prose to DSL (SLM)",
             "description": "Translate a natural-language business rule into the tauto DSL using the configured SLM provider (default: a deterministic stub; a live model only when the server opts in). Returns DSL you MUST review for faithfulness before using — then pass it to check_rule. Writes nothing and proves nothing. For simple rules you can also author the DSL yourself; use this for complex prose.",
@@ -278,6 +284,7 @@ fn handle_tool_call(ctx: &Ctx, id: Value, req: &Value) -> Value {
         "check_rule" => tool_check_rule(ctx, &args),
         "get_glossary" => tool_get_glossary(ctx, &args),
         "state_coverage" => tool_state_coverage(ctx, &args),
+        "get_verification_report" => tool_verification_report(ctx),
         "reconcile_states" => tool_reconcile_states(ctx, &args),
         "translate_rule" => tool_translate_rule(ctx, &args),
         other => Err(format!("unknown tool: {other}")),
@@ -580,6 +587,19 @@ fn tool_translate_rule(ctx: &Ctx, args: &Value) -> Result<String, String> {
         "provider": body.get("provider"),
         "notes": body.get("notes"),
         "next": "Review the DSL for faithfulness to the prose, correct if needed, then call check_rule with it. Nothing was saved.",
+    })))
+}
+
+fn tool_verification_report(ctx: &Ctx) -> Result<String, String> {
+    let mut report = ctx.get_json("/api/v1/report")?;
+    // The Lean sources are for the UI; strip them so the tool result stays
+    // bounded — the obligations metadata is the machine-readable content.
+    if let Some(obj) = report.as_object_mut() {
+        obj.remove("files");
+    }
+    Ok(pretty(&json!({
+        "report": report,
+        "note": "obligations[].discharged=true means the Lean build machine-checked that statement. kinds: satisfiability (a condition is realizable), guards_disjoint (two rules are distinct transitions, not a conflict), outcome_conflict (two rules provably contradict), dead_rule (a rule's guards can never all hold). tests[] are the executable case specs generated from the same IR.",
     })))
 }
 

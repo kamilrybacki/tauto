@@ -9,9 +9,39 @@ pub struct LeanWorkspaceFile {
     pub content: String,
 }
 
+/// One proof obligation the generator emitted, tied back to the rule(s) it
+/// certifies. Emitted alongside the Lean so machine consumers (UI, MCP, LLMs)
+/// never have to parse Lean text.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Obligation {
+    /// Contract key `entity/operation/case`.
+    pub key: String,
+    /// Theorem name in the workspace.
+    pub theorem: String,
+    /// satisfiability | guards_disjoint | outcome_conflict | dead_rule
+    pub kind: String,
+    /// The proposition proved (the part between `:` and `:=`).
+    pub statement: String,
+    /// The other contract key, for pairwise (conflict/disjointness) obligations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pair: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LeanWorkspace {
     pub files: Vec<LeanWorkspaceFile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub obligations: Vec<Obligation>,
+}
+
+/// Extract the proposition from a generated `theorem NAME : STMT := PROOF`.
+fn statement_of(theorem_text: &str, name: &str) -> String {
+    theorem_text
+        .split(" := ")
+        .next()
+        .and_then(|head| head.strip_prefix(&format!("theorem {name} : ")))
+        .unwrap_or(theorem_text)
+        .to_owned()
 }
 
 fn lean_ident(s: &str) -> String {
@@ -62,7 +92,16 @@ fn render_expr(expr: &Expression) -> String {
 /// (`requires` and `ensures`). Each is a real, `sorry`-free proof that the
 /// condition is satisfiable. Assumes/preserves and unmodelable conditions are
 /// noted as comments. Original conditions are echoed as comments for context.
-fn contract_file(contract: &ContractIR, module_name: &str, model: &Model) -> LeanWorkspaceFile {
+fn contract_key(c: &ContractIR) -> String {
+    format!("{}/{}/{}", c.entity, c.operation, c.case)
+}
+
+fn contract_file(
+    contract: &ContractIR,
+    module_name: &str,
+    model: &Model,
+    obligations: &mut Vec<Obligation>,
+) -> LeanWorkspaceFile {
     let mut body = vec![
         "import TautoContracts.Model".to_owned(),
         String::new(),
@@ -91,6 +130,13 @@ fn contract_file(contract: &ContractIR, module_name: &str, model: &Model) -> Lea
         match model::satisfiability(model, &contract.entity, &name, cond) {
             Some(t) => {
                 body.push(format!("-- {section}: {}", cond_comment(cond)));
+                obligations.push(Obligation {
+                    key: contract_key(contract),
+                    theorem: name.clone(),
+                    kind: "satisfiability".to_owned(),
+                    statement: statement_of(&t.text, &name),
+                    pair: None,
+                });
                 body.push(t.text);
                 body.push(String::new());
             }
@@ -136,7 +182,11 @@ fn model_file(model: &Model) -> LeanWorkspaceFile {
 /// the fields that are contradictorily constrained cannot both hold — turning
 /// the conflict heuristic into machine-checked theorems. Returns `None` when no
 /// pair yields a provable contradiction (so we don't emit an empty import).
-fn conflicts_file(contract_set: &ContractSet, model: &Model) -> Option<LeanWorkspaceFile> {
+fn conflicts_file(
+    contract_set: &ContractSet,
+    model: &Model,
+    obligations: &mut Vec<Obligation>,
+) -> Option<LeanWorkspaceFile> {
     let mut body = vec![
         "import TautoContracts.Model".to_owned(),
         String::new(),
@@ -183,6 +233,17 @@ fn conflicts_file(contract_set: &ContractSet, model: &Model) -> Option<LeanWorks
                             } else {
                                 "contradictory outcomes → conflict"
                             };
+                            let kind = if section == "guards" { "guards_disjoint" } else { "outcome_conflict" };
+                            let statement = statement_of(&t.text, &name);
+                            for (me, other) in [(a, b), (b, a)] {
+                                obligations.push(Obligation {
+                                    key: contract_key(me),
+                                    theorem: name.clone(),
+                                    kind: kind.to_owned(),
+                                    statement: statement.clone(),
+                                    pair: Some(contract_key(other)),
+                                });
+                            }
                             body.push(format!("-- {} vs {} on `{field}`: {note}", a.case, b.case));
                             body.push(t.text);
                             body.push(String::new());
@@ -210,7 +271,11 @@ fn conflicts_file(contract_set: &ContractSet, model: &Model) -> Option<LeanWorks
 /// The dead-rules file: for each rule whose requires can never all hold, prove
 /// the contradictory pair unsatisfiable (`∀ x, ¬(a ∧ b)`). `None` when no rule
 /// is dead.
-fn dead_rules_file(contract_set: &ContractSet, model: &Model) -> Option<LeanWorkspaceFile> {
+fn dead_rules_file(
+    contract_set: &ContractSet,
+    model: &Model,
+    obligations: &mut Vec<Obligation>,
+) -> Option<LeanWorkspaceFile> {
     let witnesses = crate::deadrule::find_dead_rule_witnesses(&contract_set.contracts);
     if witnesses.is_empty() {
         return None;
@@ -231,6 +296,13 @@ fn dead_rules_file(contract_set: &ContractSet, model: &Model) -> Option<LeanWork
         );
         if let Some(t) = model::dead_rule_theorem(model, &c.entity, &name, &w.field, &w.a, &w.b) {
             body.push(format!("-- {}: unsatisfiable requires on `{}` ({})", c.case, w.field, w.reason));
+            obligations.push(Obligation {
+                key: contract_key(c),
+                theorem: name.clone(),
+                kind: "dead_rule".to_owned(),
+                statement: statement_of(&t.text, &name),
+                pair: None,
+            });
             body.push(t.text);
             body.push(String::new());
             count += 1;
@@ -291,14 +363,15 @@ name = "TautoContracts"
 pub fn generate_lean_workspace(contract_set: &ContractSet) -> LeanWorkspace {
     let model = Model::infer(contract_set);
     let module_names = assign_module_names(&contract_set.contracts);
+    let mut obligations: Vec<Obligation> = Vec::new();
     let contract_files: Vec<LeanWorkspaceFile> = contract_set
         .contracts
         .iter()
         .zip(module_names.iter())
-        .map(|(c, name)| contract_file(c, name, &model))
+        .map(|(c, name)| contract_file(c, name, &model, &mut obligations))
         .collect();
-    let conflicts = conflicts_file(contract_set, &model);
-    let dead_rules = dead_rules_file(contract_set, &model);
+    let conflicts = conflicts_file(contract_set, &model, &mut obligations);
+    let dead_rules = dead_rules_file(contract_set, &model, &mut obligations);
     let main = main_module_file(&module_names, conflicts.is_some(), dead_rules.is_some());
     let lake = lakefile();
     let mut files = vec![lake, main, model_file(&model)];
@@ -309,7 +382,7 @@ pub fn generate_lean_workspace(contract_set: &ContractSet) -> LeanWorkspace {
     if let Some(d) = dead_rules {
         files.push(d);
     }
-    LeanWorkspace { files }
+    LeanWorkspace { files, obligations }
 }
 
 #[cfg(test)]

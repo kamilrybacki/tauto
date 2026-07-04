@@ -93,7 +93,7 @@ async fn handle_build(
                 .into_response()
         }
     };
-    let workspace = LeanWorkspace { files: req.files };
+    let workspace = LeanWorkspace { files: req.files, obligations: Vec::new() };
 
     let result = tokio::task::spawn_blocking(move || build(workspace))
         .await
