@@ -52,6 +52,56 @@ pub fn run_lake_build_remote(
         .map_err(|e| format!("invalid build response from {endpoint}: {e}"))
 }
 
+/// Per-module outcome parsed from a `lake build` log. Lake prints one line per
+/// module (`✔ [3/7] Built M`, `⚠ … Built M` with warnings, and
+/// `error: path/To/File.lean:3:8: …` on failure), so even a failed build tells
+/// us exactly which modules — and therefore which obligations — are fine.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ModuleResults {
+    /// Modules Lake reported as built (with or without warnings).
+    pub built: std::collections::HashSet<String>,
+    /// Module → first error line, for modules with compile errors.
+    pub failed: std::collections::HashMap<String, String>,
+}
+
+/// Map a workspace-relative `.lean` path to its module name
+/// (`TautoContracts/contracts/X.lean` → `TautoContracts.contracts.X`).
+fn path_to_module(path: &str) -> String {
+    path.trim_end_matches(".lean").replace('/', ".")
+}
+
+/// Parse per-module results out of a lake build log (stdout + stderr combined;
+/// lake splits its output across both). Tolerant: unrecognized lines are
+/// ignored, so a Lake format drift degrades to "unknown", never a wrong status.
+pub fn parse_module_results(log: &str) -> ModuleResults {
+    let mut out = ModuleResults::default();
+    for line in log.lines() {
+        let t = line.trim();
+        // `✔ [3/7] Built TautoContracts.contracts.X (639ms)` (or ⚠ with warnings)
+        if let Some(pos) = t.find("] Built ") {
+            let rest = &t[pos + "] Built ".len()..];
+            let module = rest.split_whitespace().next().unwrap_or("");
+            if !module.is_empty() {
+                out.built.insert(module.to_owned());
+            }
+            continue;
+        }
+        // `error: TautoContracts/contracts/X.lean:3:8: unknown identifier …`
+        if let Some(rest) = t.strip_prefix("error: ") {
+            if let Some(dot) = rest.find(".lean:") {
+                let path = &rest[..dot + ".lean".len()];
+                let module = path_to_module(path);
+                out.failed.entry(module).or_insert_with(|| t.to_owned());
+            }
+        }
+    }
+    // A module that both "Built" and errored (shouldn't happen) counts as failed.
+    for m in out.failed.keys() {
+        out.built.remove(m);
+    }
+    out
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum LakeError {
     #[error("lake not found in PATH — install Lean 4 via elan: https://github.com/leanprover/elan")]
@@ -173,6 +223,33 @@ mod tests {
         };
         assert!(matches!(mapped, LakeError::NotFound));
         drop(dir);
+    }
+
+    #[test]
+    fn parse_module_results_reads_built_and_failed() {
+        // Formats captured from real Lake 5.0 logs in this repo's CI.
+        let log = "\
+info: TautoContracts: no previous manifest, creating one from scratch
+✔ [2/7] Built TautoContracts.Model (515ms)
+⚠ [3/7] Built TautoContracts.contracts.ShipPaidOrder (3.3s)
+warning: TautoContracts/contracts/ShipPaidOrder.lean:3:8: declaration uses `sorry`
+error: TautoContracts/contracts/Broken.lean:4:10: unknown identifier 'nope'
+error: TautoContracts/contracts/Broken.lean:9:2: type mismatch
+✔ [5/7] Built TautoContracts.Conflicts (728ms)
+Build completed successfully (7 jobs).";
+        let r = parse_module_results(log);
+        assert!(r.built.contains("TautoContracts.Model"));
+        assert!(r.built.contains("TautoContracts.contracts.ShipPaidOrder"), "⚠ Built counts as built");
+        assert!(r.built.contains("TautoContracts.Conflicts"));
+        let err = r.failed.get("TautoContracts.contracts.Broken").expect("failed module");
+        assert!(err.contains("unknown identifier"), "keeps the first error line");
+        assert!(!r.built.contains("TautoContracts.contracts.Broken"));
+    }
+
+    #[test]
+    fn parse_module_results_tolerates_unknown_lines() {
+        let r = parse_module_results("some random output\nno modules here\n");
+        assert!(r.built.is_empty() && r.failed.is_empty());
     }
 
     #[test]

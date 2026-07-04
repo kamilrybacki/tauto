@@ -314,6 +314,8 @@ table.decision { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .vr-obl { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12.5px; }
 .vr-obl .vr-qed { color: var(--green); font-weight: 700; width: 12px; flex-shrink: 0; }
 .vr-obl .vr-qed.pending { color: var(--text-3); }
+.vr-obl .vr-qed.failed { color: var(--red); }
+.vr-err { flex-basis: 100%; margin-left: 20px; font-family: var(--mono); font-size: 11px; color: var(--red); overflow-wrap: anywhere; }
 .vr-kind { font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); min-width: 96px; }
 .vr-obl.red .vr-kind { color: var(--red); }
 .vr-stmt { background: none; border: none; padding: 0; font-size: 12px; color: var(--text); overflow-wrap: anywhere; }

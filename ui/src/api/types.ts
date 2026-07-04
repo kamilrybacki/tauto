@@ -157,6 +157,8 @@ export interface ReportObligation {
   statement: string;
   pair?: string;
   discharged: boolean;
+  status: 'discharged' | 'failed' | 'unknown';
+  error?: string;
 }
 
 export interface ReportRule {

@@ -599,7 +599,7 @@ fn tool_verification_report(ctx: &Ctx) -> Result<String, String> {
     }
     Ok(pretty(&json!({
         "report": report,
-        "note": "obligations[].discharged=true means the Lean build machine-checked that statement. kinds: satisfiability (a condition is realizable), guards_disjoint (two rules are distinct transitions, not a conflict), outcome_conflict (two rules provably contradict), dead_rule (a rule's guards can never all hold). tests[] are the executable case specs generated from the same IR.",
+        "note": "obligations[].status is per-module truth parsed from the Lake log: discharged (its module compiled), failed (compiler error attached), unknown (module skipped, e.g. a dependency failed). discharged=true means the Lean build machine-checked that statement. kinds: satisfiability (a condition is realizable), guards_disjoint (two rules are distinct transitions, not a conflict), outcome_conflict (two rules provably contradict), dead_rule (a rule's guards can never all hold). tests[] are the executable case specs generated from the same IR.",
     })))
 }
 

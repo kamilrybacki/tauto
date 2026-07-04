@@ -25,6 +25,9 @@ pub struct Obligation {
     /// The other contract key, for pairwise (conflict/disjointness) obligations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pair: Option<String>,
+    /// The Lean module the theorem lives in — lets build output be mapped back
+    /// to individual obligations (Lake reports per-module results).
+    pub module: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -136,6 +139,7 @@ fn contract_file(
                     kind: "satisfiability".to_owned(),
                     statement: statement_of(&t.text, &name),
                     pair: None,
+                    module: format!("TautoContracts.contracts.{module_name}"),
                 });
                 body.push(t.text);
                 body.push(String::new());
@@ -242,6 +246,7 @@ fn conflicts_file(
                                     kind: kind.to_owned(),
                                     statement: statement.clone(),
                                     pair: Some(contract_key(other)),
+                                    module: "TautoContracts.Conflicts".to_owned(),
                                 });
                             }
                             body.push(format!("-- {} vs {} on `{field}`: {note}", a.case, b.case));
@@ -302,6 +307,7 @@ fn dead_rules_file(
                 kind: "dead_rule".to_owned(),
                 statement: statement_of(&t.text, &name),
                 pair: None,
+                module: "TautoContracts.DeadRules".to_owned(),
             });
             body.push(t.text);
             body.push(String::new());

@@ -34,10 +34,13 @@ function RuleCard({ rule, discharged }: { rule: ReportRule; discharged: boolean 
       <div className="vr-obls">
         {rule.obligations.map((o) => (
           <div key={o.theorem + (o.pair ?? '')} className={`vr-obl${o.kind === 'outcome_conflict' || o.kind === 'dead_rule' ? ' red' : ''}`}>
-            <span className={`vr-qed${o.discharged ? '' : ' pending'}`}>{o.discharged ? '∎' : '…'}</span>
+            <span className={`vr-qed${o.status === 'discharged' ? '' : o.status === 'failed' ? ' failed' : ' pending'}`}>
+              {o.status === 'discharged' ? '∎' : o.status === 'failed' ? '✗' : '…'}
+            </span>
             <span className="vr-kind">{KIND_LABEL[o.kind] ?? o.kind}</span>
             <code className="vr-stmt">{o.statement}</code>
             {o.pair && <span className="vr-pair">vs {caseOf(o.pair)}</span>}
+            {o.error && <span className="vr-err">{o.error}</span>}
           </div>
         ))}
         {rule.obligations.length === 0 && (

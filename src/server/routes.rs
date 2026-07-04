@@ -575,9 +575,14 @@ struct ReportObligation {
     statement: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pair: Option<String>,
-    /// True when the workspace built cleanly (workspaces are sorry-free, so a
-    /// clean build discharges every obligation; Lake reports one bit per build).
+    /// True when this obligation's module compiled (workspaces are sorry-free).
     discharged: bool,
+    /// discharged | failed | unknown — per-module truth parsed from the build
+    /// log, so one broken rule doesn't mark the others undischarged.
+    status: String,
+    /// First compiler error for this obligation's module, when it failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -616,7 +621,10 @@ async fn handle_report(
         .map(|f| LeanFileEntry { path: f.path.clone(), content: f.content.clone() })
         .collect();
     let (build_available, result) = execute_build(workspace).await?;
-    let discharged = build_available && result.success;
+    let all_ok = build_available && result.success;
+    // Per-module truth: Lake logs one line per module, so even a failed build
+    // tells us exactly which obligations are fine.
+    let modules = crate::lean_gen::parse_module_results(&format!("{}\n{}", result.stdout, result.stderr));
 
     // Compose the per-rule pieces from the existing engines.
     let suites = test_gen::generate_suite(&cs);
@@ -637,12 +645,23 @@ async fn handle_report(
                 obligations: obligations
                     .iter()
                     .filter(|o| o.key == key)
-                    .map(|o| ReportObligation {
-                        theorem: o.theorem.clone(),
-                        kind: o.kind.clone(),
-                        statement: o.statement.clone(),
-                        pair: o.pair.clone(),
-                        discharged,
+                    .map(|o| {
+                        let (status, error) = if all_ok || modules.built.contains(&o.module) {
+                            ("discharged", None)
+                        } else if let Some(err) = modules.failed.get(&o.module) {
+                            ("failed", Some(err.clone()))
+                        } else {
+                            ("unknown", None)
+                        };
+                        ReportObligation {
+                            theorem: o.theorem.clone(),
+                            kind: o.kind.clone(),
+                            statement: o.statement.clone(),
+                            pair: o.pair.clone(),
+                            discharged: status == "discharged",
+                            status: status.to_owned(),
+                            error,
+                        }
                     })
                     .collect(),
                 tests: suites
