@@ -222,8 +222,17 @@ no Lean toolchain is required.
 `tauto mcp --api-url <serve URL>` is a stdio JSON-RPC MCP server exposing the
 contracts to LLMs (`list_contracts`, `search_contracts`, `find_conflicts`,
 `graph_neighbors`, `verify_contract`, and `check_rule` for dry-run validation of
-a proposed rule). The `.claude/skills/tauto-rules/` skill drives the full loop:
-converse about a new rule, translate it to the DSL, and check it via `check_rule`.
+a proposed rule). Two agent skills ship in `.claude/skills/`:
+
+- **`tauto-rules`** — the authoring loop: converse about a new rule, translate
+  it to the DSL, and check it via `check_rule`.
+- **`tauto-tests`** — the consumption loop: take the generated test
+  *specifications* (from `get_verification_report`) and implement them as real,
+  executable tests in the host project's language and framework — binding each
+  rule's `entity·operation` to the project's actual code, asserting the spec's
+  `given`/`ensures`, and treating a failing test as a code-vs-rules finding.
+  tauto deliberately keeps its own test output as data; this skill is the
+  bridge to runnable suites.
 
 ## The verification report (unified artifact for UIs and LLMs)
 
