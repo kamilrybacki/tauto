@@ -40,6 +40,12 @@
       font-size: 0.85rem;
       line-height: 1.5;
       overflow-x: auto;
+      white-space: pre;
+      tab-size: 2;
+    }
+    @media (max-width: 640px) {
+      /* wrap long grammar lines on narrow screens rather than overflow */
+      .grammar { white-space: pre-wrap; }
     }
     table.api td, table.api th { text-align: left; vertical-align: top; }
     table.api code { white-space: nowrap; }
